@@ -1,0 +1,51 @@
+# Auto-generated Dockerfile for ML model benchmarking
+FROM {{ base_image | default("nvidia/cuda:11.7.1-devel-ubuntu22.04") }}
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+# System dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    wget \
+    curl \
+    build-essential \
+    python3 \
+    python3-pip \
+    python3-dev \
+    sysstat \
+    procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Symlink python
+RUN ln -sf /usr/bin/python3 /usr/bin/python
+
+WORKDIR /workspace
+
+# Copy repo
+COPY . /workspace/
+
+{% if setup_commands %}
+# Project setup
+{% for cmd in setup_commands %}
+RUN {{ cmd }}
+{% endfor %}
+{% endif %}
+
+{% if pip_requirements %}
+# Install Python dependencies
+RUN pip install --no-cache-dir -r {{ pip_requirements }}
+{% endif %}
+
+{% if extra_install %}
+# Extra install steps
+{% for cmd in extra_install %}
+RUN {{ cmd }}
+{% endfor %}
+{% endif %}
+
+# Copy benchmark entrypoint
+COPY benchmark_entrypoint.sh /workspace/benchmark_entrypoint.sh
+RUN chmod +x /workspace/benchmark_entrypoint.sh
+
+ENTRYPOINT ["/workspace/benchmark_entrypoint.sh"]

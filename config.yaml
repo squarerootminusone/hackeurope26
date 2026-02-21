@@ -1,0 +1,32 @@
+target:
+  repo_url: "https://github.com/geopavlakos/hamer"
+  branch: "main"
+  paper_url: "https://arxiv.org/abs/2312.05251"
+  dataset: "FREIHAND-VAL"
+  eval_command: "python eval.py --dataset FREIHAND-VAL --batch_size 16 --num_workers 8"
+  accuracy_metrics:
+    - "PA-MPJPE"
+    - "PA-MPVPE"
+    - "F@5mm"
+    - "F@15mm"
+  paper_baselines:
+    PA-MPJPE: 6.0
+    PA-MPVPE: 5.7
+    F@15mm: 0.990
+
+optimization:
+  guide: "guides/default_optimizations.md"
+  custom_guide: ""
+  max_retries: 3
+
+cloud:
+  provider: "runpod"
+  gpu_types: ["NVIDIA A100 80GB", "NVIDIA L40S", "NVIDIA RTX 4090"]
+  region: "US"
+  container_registry: "dockerhub"
+  registry_prefix: "username"
+
+benchmark:
+  runs_per_config: 3
+  warmup_runs: 1
+  timeout_minutes: 60

@@ -1,0 +1,43 @@
+#!/bin/bash
+set -e
+
+echo "=== BENCHMARK START ==="
+echo "TIMESTAMP: $(date -u +%Y-%m-%dT%H:%M:%S.%NZ)"
+
+# Start nvidia-smi monitoring in background (CSV every 1 second)
+nvidia-smi --query-gpu=timestamp,gpu_name,utilization.gpu,utilization.memory,memory.used,memory.total,power.draw,temperature.gpu \
+    --format=csv,nounits -l 1 > /workspace/gpu_metrics.csv 2>/dev/null &
+NVIDIA_PID=$!
+
+# Start CPU/RAM monitoring in background
+(while true; do
+    echo "$(date -u +%Y-%m-%dT%H:%M:%S.%NZ),$(mpstat 1 1 | tail -1 | awk '{print 100-$NF}'),$(free -m | awk '/Mem:/{printf "%d,%d", $3, $2}')"
+    sleep 1
+done) > /workspace/cpu_metrics.csv 2>/dev/null &
+CPU_PID=$!
+
+# Run the eval command
+echo "=== EVAL COMMAND START ==="
+EVAL_START=$(date +%s%N)
+
+{{ eval_command }}
+EVAL_EXIT_CODE=$?
+
+EVAL_END=$(date +%s%N)
+EVAL_WALL_TIME_MS=$(( (EVAL_END - EVAL_START) / 1000000 ))
+echo "=== EVAL COMMAND END ==="
+echo "EVAL_EXIT_CODE: $EVAL_EXIT_CODE"
+echo "EVAL_WALL_TIME_MS: $EVAL_WALL_TIME_MS"
+
+# Stop monitoring
+kill $NVIDIA_PID 2>/dev/null || true
+kill $CPU_PID 2>/dev/null || true
+
+# Dump collected metrics
+echo "=== GPU METRICS ==="
+cat /workspace/gpu_metrics.csv
+echo "=== CPU METRICS ==="
+cat /workspace/cpu_metrics.csv
+
+echo "=== BENCHMARK END ==="
+echo "TIMESTAMP: $(date -u +%Y-%m-%dT%H:%M:%S.%NZ)"
