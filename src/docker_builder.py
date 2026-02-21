@@ -1,7 +1,7 @@
 """Step 2 & 5: Docker container building (original + optimized)."""
 
 import logging
-import shutil
+import os
 import subprocess
 from pathlib import Path
 
@@ -18,8 +18,8 @@ class BuildError(Exception):
 def build(repo_path: str | Path, tag: str, config: dict) -> str:
     """Build a Docker image from the repo.
 
-    If the repo has a Dockerfile, uses it. Otherwise, auto-generates one
-    from the Jinja2 template. Injects the benchmark entrypoint script.
+    If the repo has a Dockerfile, uses it (with entrypoint injection).
+    Otherwise, auto-generates one from the Jinja2 template.
     On failure, uses Claude Code API to diagnose and fix, retrying up to max_retries.
 
     Returns the Docker image tag.
@@ -31,8 +31,12 @@ def build(repo_path: str | Path, tag: str, config: dict) -> str:
     # Ensure benchmark entrypoint is in the repo
     _inject_entrypoint(repo_path, config)
 
-    # Check for existing Dockerfile
-    if not _has_dockerfile(repo_path):
+    # Use existing Dockerfile if available, otherwise generate one
+    dockerfile_path = _find_dockerfile(repo_path)
+    if dockerfile_path:
+        logger.info("Using existing Dockerfile: %s", dockerfile_path)
+        _adapt_existing_dockerfile(repo_path, dockerfile_path, config)
+    else:
         _generate_dockerfile(repo_path, config)
 
     # Build with retries
@@ -84,13 +88,101 @@ def push(image_tag: str, config: dict) -> str:
     return remote_tag
 
 
-def _has_dockerfile(repo_path: Path) -> bool:
-    """Check if the repo already has a Dockerfile."""
+def _find_dockerfile(repo_path: Path) -> Path | None:
+    """Find an existing Dockerfile in the repo."""
+    # Check common locations
     candidates = [
         repo_path / "Dockerfile",
         repo_path / "docker" / "Dockerfile",
     ]
-    return any(c.exists() for c in candidates)
+
+    # Also check for named Dockerfiles in docker/ dir
+    docker_dir = repo_path / "docker"
+    if docker_dir.is_dir():
+        for f in docker_dir.iterdir():
+            if f.name.endswith(".Dockerfile") or f.name.startswith("Dockerfile"):
+                candidates.append(f)
+
+    for c in candidates:
+        if c.exists() and c.is_file():
+            return c
+
+    return None
+
+
+def _adapt_existing_dockerfile(repo_path: Path, dockerfile_path: Path, config: dict) -> None:
+    """Adapt an existing Dockerfile by appending benchmark entrypoint setup."""
+    content = dockerfile_path.read_text()
+
+    # Override base image if configured
+    base_image = config.get("docker", {}).get("base_image")
+    if base_image:
+        import re
+        content = re.sub(
+            r'ARG BASE=\S+',
+            f'ARG BASE={base_image}',
+            content,
+        )
+        logger.info("Overriding base image to: %s", base_image)
+
+        # If using a pre-built base image, skip torch/numpy/setuptools/gdown
+        # installs since they're already present. Also skip venv creation.
+        # Handle multiline RUN commands (with --mount and line continuations)
+        skip_patterns = [
+            # Multiline RUN with --mount (e.g., RUN --mount=... \\\n    pip install ...)
+            r'RUN\s+--mount=\S+\s*\\\n\s*pip install[^\n]*(?:wheel|setuptools)[^\n]*\n',
+            r'RUN\s+--mount=\S+\s*\\\n\s*pip install[^\n]*torch==[^\n]*\n',
+            r'RUN\s+--mount=\S+\s*\\\n\s*pip install numpy\n',
+            r'RUN\s+--mount=\S+\s*\\\n\s*pip install gdown\n',
+            # Single-line RUN
+            r'RUN\s+pip install[^\n]*(?:wheel|setuptools)[^\n]*\n',
+            r'RUN\s+pip install[^\n]*torch==[^\n]*\n',
+            r'RUN\s+pip install numpy\n',
+            r'RUN\s+pip install gdown\n',
+            # Venv setup
+            r'RUN python3 -m venv /opt/venv\n',
+            r'ENV PATH="/opt/venv/bin:\$PATH"\n',
+            # Comment lines for removed steps
+            r'# Create virtual environment:\n',
+            r'# Add virtual environment to PATH\n',
+            r'# REVIEW:.*\n',
+            r'# Install torch and torchvision:\n',
+            r'# Activate virtual environment and install dependencies:\n',
+            r'# Install gdown[^\n]*:\n',
+        ]
+        for pattern in skip_patterns:
+            content = re.sub(pattern, '', content)
+
+        # Add --no-build-isolation to pip install -e commands so
+        # detectron2's setup.py can find torch from the base image
+        content = re.sub(
+            r'pip install -e \.\[all\]',
+            'pip install --no-build-isolation -e .[all]',
+            content,
+        )
+        content = re.sub(
+            r'pip install -v -e third-party/',
+            'pip install --no-build-isolation -v -e third-party/',
+            content,
+        )
+
+        # Clean up excessive blank lines
+        content = re.sub(r'\n{3,}', '\n\n', content)
+
+        logger.info("Stripped redundant install steps for pre-built base")
+
+    # Append entrypoint injection if not already present
+    if "benchmark_entrypoint" not in content:
+        content += "\n\n# Benchmark entrypoint (injected by pipeline)\n"
+        content += "RUN apt-get update && apt-get install -y --no-install-recommends sysstat procps && rm -rf /var/lib/apt/lists/*\n"
+        content += "COPY benchmark_entrypoint.sh /workspace/benchmark_entrypoint.sh\n"
+        content += "RUN chmod +x /workspace/benchmark_entrypoint.sh\n"
+        content += 'ENTRYPOINT ["/workspace/benchmark_entrypoint.sh"]\n'
+
+    # Write the adapted Dockerfile to repo root
+    target = repo_path / "Dockerfile"
+    target.write_text(content)
+    logger.info("Adapted Dockerfile written to %s", target)
 
 
 def _generate_dockerfile(repo_path: Path, config: dict) -> None:
@@ -116,37 +208,92 @@ def _generate_dockerfile(repo_path: Path, config: dict) -> None:
 def _detect_project_setup(repo_path: Path, config: dict) -> dict:
     """Inspect the repo to determine build context for Dockerfile generation."""
     context = {
-        "base_image": "nvidia/cuda:11.7.1-devel-ubuntu22.04",
-        "setup_commands": [],
+        "base_image": "nvidia/cuda:12.6.2-devel-ubuntu22.04",
+        "torch_install": None,
         "pip_requirements": None,
-        "extra_install": [],
+        "pre_install_commands": [],
+        "setup_commands": [],
+        "submodule_installs": [],
+        "post_install_commands": [],
     }
+
+    # Detect if torch is needed (check setup.py, requirements.txt)
+    needs_torch = _needs_torch(repo_path)
+    if needs_torch:
+        context["torch_install"] = (
+            "pip install --no-cache-dir "
+            "torch==2.2.0 torchvision==0.17.0 "
+            "--index-url https://download.pytorch.org/whl/cu118"
+        )
 
     # Check for requirements.txt
     if (repo_path / "requirements.txt").exists():
         context["pip_requirements"] = "requirements.txt"
 
+    # Check for submodules and third-party deps (must install before main package)
+    if (repo_path / ".gitmodules").exists():
+        third_party_dir = repo_path / "third-party"
+        if third_party_dir.exists() and third_party_dir.is_dir():
+            for entry in sorted(third_party_dir.iterdir()):
+                if entry.is_dir() and (
+                    (entry / "setup.py").exists()
+                    or (entry / "pyproject.toml").exists()
+                ):
+                    rel = entry.relative_to(repo_path)
+                    context["submodule_installs"].append(
+                        f"pip install --no-cache-dir -v -e {rel}"
+                    )
+
+    # Install gdown if fetch scripts exist (needed for Google Drive downloads)
+    for script_name in ["fetch_demo_data.sh", "download_data.sh"]:
+        if (repo_path / script_name).exists():
+            context["pre_install_commands"].append(
+                "pip install --no-cache-dir gdown"
+            )
+            break
+
     # Check for setup.py or pyproject.toml
     if (repo_path / "setup.py").exists():
-        context["setup_commands"].append("pip install -e .[all] 2>/dev/null || pip install -e .")
+        context["setup_commands"].append(
+            "pip install --no-cache-dir -e .[all] 2>/dev/null || pip install --no-cache-dir -e ."
+        )
     elif (repo_path / "pyproject.toml").exists():
-        context["setup_commands"].append("pip install -e .[all] 2>/dev/null || pip install -e .")
+        context["setup_commands"].append(
+            "pip install --no-cache-dir -e .[all] 2>/dev/null || pip install --no-cache-dir -e ."
+        )
 
-    # Check for submodules (like ViTPose in HaMeR)
-    if (repo_path / ".gitmodules").exists():
-        context["extra_install"].append("git submodule update --init --recursive")
-        # Check for third-party dirs with their own setup
-        for third_party in (repo_path / "third-party").iterdir() if (repo_path / "third-party").exists() else []:
-            if (third_party / "setup.py").exists() or (third_party / "pyproject.toml").exists():
-                rel = third_party.relative_to(repo_path)
-                context["extra_install"].append(f"pip install -v -e {rel}")
-
-    # Check for data fetch scripts
+    # Data fetch scripts (run after install)
     for script_name in ["fetch_demo_data.sh", "download_data.sh", "setup.sh"]:
         if (repo_path / script_name).exists():
-            context["extra_install"].append(f"bash {script_name}")
+            context["post_install_commands"].append(f"bash {script_name}")
 
     return context
+
+
+def _needs_torch(repo_path: Path) -> bool:
+    """Check if the repo requires PyTorch."""
+    # Check setup.py
+    setup_py = repo_path / "setup.py"
+    if setup_py.exists():
+        content = setup_py.read_text()
+        if "torch" in content or "detectron2" in content:
+            return True
+
+    # Check requirements.txt
+    req_txt = repo_path / "requirements.txt"
+    if req_txt.exists():
+        content = req_txt.read_text()
+        if "torch" in content:
+            return True
+
+    # Check pyproject.toml
+    pyproject = repo_path / "pyproject.toml"
+    if pyproject.exists():
+        content = pyproject.read_text()
+        if "torch" in content:
+            return True
+
+    return False
 
 
 def _inject_entrypoint(repo_path: Path, config: dict) -> None:
@@ -172,16 +319,13 @@ def _inject_entrypoint(repo_path: Path, config: dict) -> None:
 
 def _docker_build(repo_path: Path, image_tag: str) -> tuple[bool, str]:
     """Run docker build. Returns (success, error_log)."""
-    # Find the Dockerfile
-    if (repo_path / "Dockerfile").exists():
-        dockerfile = repo_path / "Dockerfile"
-    elif (repo_path / "docker" / "Dockerfile").exists():
-        dockerfile = repo_path / "docker" / "Dockerfile"
-    else:
+    dockerfile = repo_path / "Dockerfile"
+    if not dockerfile.exists():
         return False, "No Dockerfile found in repo"
 
     cmd = [
         "docker", "build",
+        "--platform", "linux/amd64",
         "-t", image_tag,
         "-f", str(dockerfile),
         str(repo_path),
@@ -191,13 +335,20 @@ def _docker_build(repo_path: Path, image_tag: str) -> tuple[bool, str]:
         cmd,
         capture_output=True,
         text=True,
-        timeout=1800,  # 30 minute timeout
+        timeout=3600,  # 60 minute timeout for large ML images
     )
 
     if result.returncode == 0:
         return True, ""
 
     return False, result.stdout + "\n" + result.stderr
+
+
+def _get_claude_env() -> dict:
+    """Get environment for Claude subprocess with CLAUDECODE unset."""
+    env = os.environ.copy()
+    env.pop("CLAUDECODE", None)
+    return env
 
 
 def _fix_build(repo_path: Path, error_log: str, attempt: int) -> None:
@@ -219,15 +370,19 @@ def _fix_build(repo_path: Path, error_log: str, attempt: int) -> None:
         f"Only make minimal, targeted changes to resolve the build error."
     )
 
-    result = subprocess.run(
-        ["claude", "-p", prompt, "--output-format", "text"],
-        cwd=str(repo_path),
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
+    try:
+        result = subprocess.run(
+            ["claude", "-p", prompt, "--output-format", "text"],
+            cwd=str(repo_path),
+            capture_output=True,
+            text=True,
+            timeout=300,
+            env=_get_claude_env(),
+        )
 
-    if result.returncode != 0:
-        logger.warning("Claude fix attempt failed: %s", result.stderr)
-    else:
-        logger.info("Claude applied fixes for build attempt %d", attempt)
+        if result.returncode != 0:
+            logger.warning("Claude fix attempt failed: %s", result.stderr)
+        else:
+            logger.info("Claude applied fixes for build attempt %d", attempt)
+    except subprocess.TimeoutExpired:
+        logger.warning("Claude fix attempt timed out for attempt %d", attempt)

@@ -1,6 +1,7 @@
 """Step 4: Implements optimizations (via Claude API)."""
 
 import logging
+import os
 import subprocess
 from dataclasses import asdict
 from pathlib import Path
@@ -108,12 +109,17 @@ def _apply_optimization(
     if conversation_id:
         cmd.extend(["--continue", conversation_id])
 
+    # Unset CLAUDECODE to allow nested invocation
+    env = os.environ.copy()
+    env.pop("CLAUDECODE", None)
+
     result = subprocess.run(
         cmd,
         cwd=str(repo_path),
         capture_output=True,
         text=True,
         timeout=300,
+        env=env,
     )
 
     if result.returncode != 0:

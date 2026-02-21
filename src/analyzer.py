@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 import subprocess
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -133,6 +134,13 @@ Focus on optimizations that:
 Sort optimizations by priority (1 = highest impact, apply first)."""
 
 
+def _get_claude_env() -> dict:
+    """Get environment for Claude subprocess with CLAUDECODE unset."""
+    env = os.environ.copy()
+    env.pop("CLAUDECODE", None)
+    return env
+
+
 def _call_claude(prompt: str, repo_path: Path) -> str:
     """Call Claude Code CLI to analyze the repo."""
     result = subprocess.run(
@@ -141,6 +149,7 @@ def _call_claude(prompt: str, repo_path: Path) -> str:
         capture_output=True,
         text=True,
         timeout=600,
+        env=_get_claude_env(),
     )
 
     if result.returncode != 0:
