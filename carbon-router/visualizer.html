@@ -1,0 +1,1603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Carbon-Aware Inference Router</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+    background: #0a0e17;
+    color: #c8d6e5;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  /* Header */
+  .header {
+    background: linear-gradient(135deg, #0a0e17 0%, #111927 50%, #0a0e17 100%);
+    border-bottom: 1px solid #1e293b;
+    padding: 20px 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .header-logo {
+    width: 36px; height: 36px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #00e5a0, #0ea5e9);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; font-weight: 800; color: #0a0e17;
+  }
+  .header-title {
+    font-size: 16px; font-weight: 700; color: #f1f5f9;
+    letter-spacing: -0.02em;
+  }
+  .header-sub {
+    font-size: 11px; color: #64748b; margin-top: 2px;
+  }
+  .header-sub .origin-name { color: #f472b6; }
+  .header-time {
+    font-size: 11px; color: #64748b;
+  }
+
+  /* Content — two-column split on desktop */
+  .content { padding: 20px 28px; }
+  .desktop-split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    align-items: start;
+  }
+  .map-col {
+    position: sticky;
+    top: 20px;
+    align-self: start;
+  }
+  .map-col .panel { margin-bottom: 0; }
+  .controls-col {
+    min-width: 0; /* prevent grid blowout */
+  }
+  @media (max-width: 1100px) {
+    .desktop-split {
+      grid-template-columns: 1fr;
+    }
+    .map-col {
+      position: static;
+    }
+  }
+
+  /* Panels */
+  .panel {
+    background: #111927;
+    border: 1px solid #1e293b;
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-bottom: 20px;
+  }
+  .panel-label {
+    font-size: 11px; font-weight: 600; color: #64748b;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    margin-bottom: 12px;
+  }
+
+  /* Origin presets */
+  .origin-presets {
+    display: flex; gap: 6px; flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  .origin-btn {
+    padding: 4px 10px; font-size: 10px; font-weight: 600;
+    font-family: inherit; border: 1px solid #1e293b;
+    border-radius: 5px; background: transparent;
+    color: #94a3b8; cursor: pointer; white-space: nowrap;
+    transition: all 0.15s;
+  }
+  .origin-btn:hover { border-color: #334155; color: #e2e8f0; }
+  .origin-btn.active {
+    border-color: #f472b6; background: rgba(244,114,182,0.06);
+    color: #f472b6;
+  }
+
+  /* Map */
+  .map-svg {
+    width: 100%; height: auto; cursor: crosshair;
+    border-radius: 8px; display: block;
+    touch-action: none; user-select: none;
+  }
+
+  /* Ternary + controls row */
+  .weights-row {
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  .ternary-svg {
+    cursor: crosshair; display: block;
+    touch-action: none; user-select: none;
+  }
+  .weight-bars { display: flex; flex-direction: column; gap: 10px; flex: 1; min-width: 160px; }
+  .weight-bar-item label {
+    display: flex; justify-content: space-between; margin-bottom: 3px;
+  }
+  .weight-bar-item label span { font-size: 11px; font-weight: 600; }
+  .weight-bar-item label .pct { font-weight: 700; }
+  .weight-track {
+    height: 6px; background: #1a2438; border-radius: 3px; overflow: hidden;
+  }
+  .weight-fill {
+    height: 100%; border-radius: 3px; transition: width 0.1s;
+  }
+  .preset-btns {
+    display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px;
+  }
+  .preset-btn {
+    padding: 3px 8px; font-size: 9px; font-weight: 600;
+    font-family: inherit; border: 1px solid #1e293b;
+    border-radius: 4px; background: transparent;
+    color: #94a3b8; cursor: pointer;
+  }
+  .preset-btn:hover { border-color: #334155; color: #e2e8f0; }
+  .sim-btn {
+    margin-top: 6px; padding: 10px 20px; font-size: 12px;
+    font-weight: 700; font-family: inherit; width: 100%;
+    background: linear-gradient(135deg, #00e5a0, #0ea5e9);
+    border: none; border-radius: 6px; color: #0a0e17;
+    cursor: pointer; letter-spacing: 0.02em;
+  }
+  .sim-btn:hover { filter: brightness(1.1); }
+
+  /* Best route banner */
+  .best-banner {
+    border-radius: 10px; padding: 14px 20px;
+    margin-bottom: 20px;
+    display: flex; align-items: center;
+    justify-content: space-between; flex-wrap: wrap; gap: 12px;
+  }
+  .best-banner .route-label {
+    font-size: 11px; color: #64748b; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .best-banner .route-name {
+    font-size: 18px; font-weight: 700; color: #f1f5f9; margin-top: 4px;
+  }
+  .best-banner .grade {
+    margin-left: 10px; font-size: 12px; padding: 2px 8px; border-radius: 4px;
+  }
+  .best-banner .metrics {
+    display: flex; gap: 24px;
+  }
+  .best-banner .metric { text-align: center; }
+  .best-banner .metric .val { font-size: 20px; font-weight: 700; }
+  .best-banner .metric .lbl { font-size: 10px; color: #64748b; }
+
+  /* Region cards */
+  .cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 12px;
+  }
+  .region-card {
+    background: #0d1320; border: 1px solid #1e293b;
+    border-radius: 10px; padding: 16px; cursor: pointer;
+    transition: all 0.2s; position: relative; overflow: hidden;
+  }
+  .region-card:hover { border-color: #334155; }
+  .region-card.best {
+    background: #111927;
+  }
+  .region-card.offline { opacity: 0.5; }
+  .region-card .best-tag {
+    position: absolute; top: 0; right: 0;
+    color: #0a0e17; font-size: 9px; font-weight: 800;
+    padding: 3px 10px; border-bottom-left-radius: 6px;
+    letter-spacing: 0.05em;
+  }
+  .region-card .card-header {
+    display: flex; justify-content: space-between;
+    align-items: flex-start; margin-bottom: 10px;
+  }
+  .region-card .card-name {
+    font-size: 13px; font-weight: 700; color: #f1f5f9;
+  }
+  .region-card .card-id {
+    font-size: 10px; color: #475569; margin-top: 2px;
+  }
+  .region-card .card-status {
+    font-size: 9px; font-weight: 700; padding: 2px 8px;
+    border-radius: 4px;
+  }
+  .region-card .card-power {
+    font-size: 10px; color: #64748b; margin-bottom: 10px;
+  }
+  .region-card .card-metrics {
+    display: flex; gap: 16px;
+  }
+  .region-card .card-metric .val {
+    font-size: 18px; font-weight: 700;
+  }
+  .region-card .card-metric .lbl {
+    font-size: 9px; color: #475569;
+  }
+  .region-card .card-metric.score-metric { margin-left: auto; }
+  .region-card .card-detail {
+    margin-top: 12px; padding-top: 12px;
+    border-top: 1px solid #1e293b;
+    font-size: 11px; color: #94a3b8;
+  }
+  .region-card .carbon-bar-track {
+    flex: 1; height: 4px; background: #1e293b;
+    border-radius: 2px; overflow: hidden;
+  }
+  .region-card .carbon-bar-fill {
+    height: 100%; border-radius: 2px; transition: width 0.5s;
+  }
+
+  /* Scoring table */
+  .score-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .score-table th {
+    text-align: left; padding: 6px 8px; font-size: 10px;
+    text-transform: uppercase; letter-spacing: 0.8px;
+    color: #64748b; border-bottom: 1px solid #1e293b;
+    white-space: nowrap;
+  }
+  .score-table td {
+    padding: 5px 8px; border-bottom: 1px solid #1e293b15;
+    white-space: nowrap;
+  }
+  .score-table tr { cursor: pointer; transition: background 0.1s; }
+  .score-table tr:hover { background: rgba(255,255,255,0.02); }
+  .score-table tr.best-row { background: rgba(0,229,160,0.06); }
+  .score-table tr.best-row td:first-child {
+    border-left: 3px solid #00e5a0; padding-left: 5px;
+  }
+  .score-table tr.unhealthy-row { opacity: 0.35; text-decoration: line-through; }
+  .score-table .norm { font-size: 10px; color: #475569; }
+  .score-table .score-val { font-weight: 700; }
+
+  /* Route history */
+  .history-row {
+    display: flex; gap: 16px; padding: 6px 0;
+    border-bottom: 1px solid rgba(30,41,59,0.08);
+    font-size: 11px; flex-wrap: wrap;
+  }
+  .history-row .h-time { color: #475569; min-width: 75px; }
+  .history-row .h-origin { color: #f472b6; min-width: 80px; }
+  .history-row .h-dest { color: #f1f5f9; font-weight: 600; min-width: 160px; }
+  .history-row .h-latency { color: #0ea5e9; }
+  .history-row .h-score { color: #64748b; }
+
+  /* Detail panel */
+  .detail-section { margin-bottom: 16px; }
+  .detail-section h3 {
+    font-size: 11px; color: #64748b; margin-bottom: 6px;
+    text-transform: uppercase; letter-spacing: 0.8px;
+  }
+  .detail-row {
+    display: flex; justify-content: space-between;
+    padding: 3px 0; font-size: 12px;
+  }
+  .detail-row .dl { color: #64748b; }
+  .detail-row .dv { color: #f1f5f9; font-weight: 500; }
+  .detail-row .dv.accent { color: #00e5a0; }
+  .breakdown-bar {
+    display: flex; height: 6px; border-radius: 3px;
+    overflow: hidden; margin: 6px 0; background: #1a2438;
+  }
+  .breakdown-bar div { height: 100%; }
+  .bb-carbon { background: #00e5a0; }
+  .bb-latency { background: #0ea5e9; }
+  .bb-cost { background: #f59e0b; }
+  .legend-row {
+    display: flex; gap: 12px; font-size: 10px; color: #64748b; margin-top: 4px;
+  }
+  .legend-item { display: flex; align-items: center; gap: 4px; }
+  .legend-dot { width: 8px; height: 8px; border-radius: 2px; }
+  .latency-path-box {
+    font-size: 11px; background: #0d1320; padding: 8px;
+    border-radius: 4px; margin-top: 4px;
+  }
+  .lat-seg {
+    display: flex; justify-content: space-between; padding: 2px 0;
+  }
+  .lat-seg .ms { color: #0ea5e9; }
+  .headers-block {
+    font-size: 11px; background: #0d1320; padding: 8px;
+    border-radius: 4px; white-space: pre; overflow-x: auto;
+    color: #64748b; line-height: 1.6;
+  }
+  .hdr-name { color: #0ea5e9; }
+  .hdr-val { color: #f1f5f9; }
+
+  /* Cards grid fills the right column */
+  .cards-grid { margin-bottom: 20px; }
+
+  /* Chart */
+  .chart-canvas { width: 100%; height: 200px; }
+
+  /* Map tooltip */
+  .map-tooltip {
+    position: absolute; background: #1a2438;
+    border: 1px solid #1e293b; padding: 6px 10px;
+    border-radius: 4px; font-size: 11px;
+    pointer-events: none; z-index: 100;
+    display: none; white-space: nowrap; color: #e2e8f0;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: #0a0e17; }
+  ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div class="header-left">
+    <div class="header-logo">&#10177;</div>
+    <div>
+      <div class="header-title">Carbon-Aware Inference Router</div>
+      <div class="header-sub">
+        Crusoe Cloud &middot; Routing from <span class="origin-name" id="header-origin"></span>
+      </div>
+    </div>
+  </div>
+  <div class="header-time" id="utc-clock"></div>
+</div>
+
+<div class="content">
+  <div class="desktop-split">
+
+    <!-- LEFT: Map Column (sticky) -->
+    <div class="map-col">
+      <div class="panel" id="origin-panel">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+          <div class="panel-label" style="margin-bottom:0">Request Origin &mdash; Click map or select city</div>
+          <div style="font-size:11px;color:#f472b6;font-weight:600" id="origin-coords"></div>
+        </div>
+        <div class="origin-presets" id="origin-presets"></div>
+        <div style="position:relative">
+          <svg id="map-svg" class="map-svg" viewBox="0 0 440 175"></svg>
+          <div class="map-tooltip" id="map-tooltip"></div>
+        </div>
+      </div>
+
+      <!-- Detail Panel (below map on desktop) -->
+      <div class="panel" id="detail-panel" style="margin-top:20px">
+        <div class="panel-label">Backend Detail</div>
+        <div id="detail-content"><p style="color:#64748b;font-size:12px">Click a backend to inspect.</p></div>
+      </div>
+    </div>
+
+    <!-- RIGHT: Controls + Results Column -->
+    <div class="controls-col">
+
+      <!-- Ternary Weights -->
+      <div class="panel">
+        <div class="weights-row">
+          <div>
+            <div class="panel-label">Routing Weights</div>
+            <svg id="ternary-svg" class="ternary-svg" viewBox="0 0 308 234" style="width:220px;height:auto"></svg>
+          </div>
+          <div class="weight-bars">
+            <div class="weight-bar-item" id="wb-carbon"></div>
+            <div class="weight-bar-item" id="wb-latency"></div>
+            <div class="weight-bar-item" id="wb-cost"></div>
+            <div class="preset-btns" id="preset-btns"></div>
+            <button class="sim-btn" id="sim-btn">&#9654; Simulate Request</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Hour / Carbon Source Controls -->
+      <div class="panel" style="display:flex;gap:20px;flex-wrap:wrap;align-items:center">
+        <div style="flex:1;min-width:140px">
+          <div class="panel-label">Time of Day (UTC)</div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input type="range" id="hour-slider" min="0" max="23" value="12" style="flex:1;-webkit-appearance:none;height:4px;background:#1a2438;border-radius:2px;outline:none">
+            <span id="hour-val" style="width:40px;text-align:center;font-size:12px;color:#0ea5e9">12:00</span>
+          </div>
+          <label style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:11px;color:#64748b;cursor:pointer">
+            <input type="checkbox" id="live-toggle" checked style="accent-color:#0ea5e9"> Use live UTC
+          </label>
+        </div>
+        <div style="flex:1;min-width:140px">
+          <div class="panel-label">Carbon Source</div>
+          <select id="carbon-source" style="width:100%;padding:5px 8px;background:#0d1320;border:1px solid #1e293b;border-radius:4px;color:#f1f5f9;font-family:inherit;font-size:12px">
+            <option value="simulated" selected>Simulated (local)</option>
+            <option value="auto">Auto-detect (try APIs)</option>
+            <option value="electricity_maps">ElectricityMaps</option>
+            <option value="watttime">WattTime</option>
+            <option value="uk_carbon_intensity">UK Carbon Intensity</option>
+          </select>
+        </div>
+        <div style="flex:1;min-width:120px">
+          <div class="panel-label">Auto-Refresh</div>
+          <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:#64748b;cursor:pointer">
+            <input type="checkbox" id="auto-refresh" checked style="accent-color:#00e5a0"> Every 5s
+          </label>
+        </div>
+      </div>
+
+      <!-- API Credentials -->
+      <div class="panel" id="api-creds-panel" style="display:none">
+        <div class="panel-label">API Credentials</div>
+        <div id="api-status" style="font-size:10px;margin-bottom:10px"></div>
+        <div id="cred-emaps" style="margin-bottom:10px;display:none">
+          <label style="font-size:10px;color:#64748b;display:block;margin-bottom:3px">ElectricityMaps API Key (<a href="https://www.electricitymaps.com/free-tier-api" target="_blank" style="color:#0ea5e9">get free key</a>)</label>
+          <input type="text" id="emaps-key" placeholder="auth-token..." style="width:100%;padding:5px 8px;background:#0d1320;border:1px solid #1e293b;border-radius:4px;color:#f1f5f9;font-family:inherit;font-size:11px">
+        </div>
+        <div id="cred-watttime" style="margin-bottom:10px;display:none">
+          <label style="font-size:10px;color:#64748b;display:block;margin-bottom:3px">WattTime (<a href="https://watttime.org/api-documentation/" target="_blank" style="color:#0ea5e9">register free</a>)</label>
+          <div style="display:flex;gap:6px">
+            <input type="text" id="wt-user" placeholder="username" style="flex:1;padding:5px 8px;background:#0d1320;border:1px solid #1e293b;border-radius:4px;color:#f1f5f9;font-family:inherit;font-size:11px">
+            <input type="password" id="wt-pass" placeholder="password" style="flex:1;padding:5px 8px;background:#0d1320;border:1px solid #1e293b;border-radius:4px;color:#f1f5f9;font-family:inherit;font-size:11px">
+          </div>
+        </div>
+        <div id="cred-uk" style="display:none">
+          <div style="font-size:10px;color:#00e5a0">UK Carbon Intensity &mdash; no auth required, free unlimited API</div>
+        </div>
+        <button id="fetch-now-btn" style="margin-top:8px;padding:6px 14px;font-size:11px;font-weight:600;font-family:inherit;background:#0d1320;border:1px solid #1e293b;border-radius:4px;color:#0ea5e9;cursor:pointer">Fetch Now</button>
+      </div>
+
+      <!-- Best Route Banner -->
+      <div class="best-banner" id="best-banner" style="display:none"></div>
+
+      <!-- Region Cards -->
+      <div class="cards-grid" id="cards-grid"></div>
+
+      <!-- Scoring Table -->
+      <div class="panel">
+        <div class="panel-label">Scoring Results</div>
+        <div style="overflow-x:auto">
+          <table class="score-table">
+            <thead>
+              <tr>
+                <th>#</th><th>ID</th><th>Name</th>
+                <th>Carbon</th><th>C/500</th>
+                <th>Latency</th><th>L/300</th>
+                <th>Load%</th><th>Ld/100</th>
+                <th>Score</th><th>Source</th><th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="score-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Route History -->
+      <div class="panel" id="history-panel" style="display:none">
+        <div class="panel-label">Route History</div>
+        <div id="history-content"></div>
+      </div>
+
+      <!-- 24h Carbon Chart -->
+      <div class="panel">
+        <div class="panel-label">24-Hour Carbon Intensity Curves</div>
+        <canvas id="carbon-chart" class="chart-canvas"></canvas>
+      </div>
+
+    </div><!-- /controls-col -->
+  </div><!-- /desktop-split -->
+</div>
+
+<script>
+// ============================================================
+// RUST-ACCURATE CORE LOGIC + ALL JSX VISUAL FEATURES
+// ============================================================
+
+const PI = Math.PI;
+
+// ── Latency Model (latency.rs exact port) ───────────────────
+
+const NETWORK_HUBS = [
+  { name: "NYC/Ashburn", lat: 39.0, lng: -77.5 },
+  { name: "LA/SJC", lat: 34.5, lng: -118.5 },
+  { name: "Dallas", lat: 32.8, lng: -96.8 },
+  { name: "London", lat: 51.5, lng: -0.1 },
+  { name: "Frankfurt", lat: 50.1, lng: 8.7 },
+  { name: "Singapore", lat: 1.3, lng: 103.8 },
+  { name: "Tokyo", lat: 35.7, lng: 139.7 },
+  { name: "Sydney", lat: -33.9, lng: 151.2 },
+  { name: "S\u00E3o Paulo", lat: -23.5, lng: -46.6 },
+  { name: "Mumbai", lat: 19.1, lng: 72.9 },
+  { name: "Reykjav\u00EDk", lat: 64.1, lng: -21.9 },
+];
+
+const CROSSING_PENALTIES = [
+  ["NYC/Ashburn", "London", 35.0],
+  ["NYC/Ashburn", "Reykjav\u00EDk", 28.0],
+  ["London", "Reykjav\u00EDk", 20.0],
+  ["LA/SJC", "Tokyo", 55.0],
+  ["LA/SJC", "Singapore", 85.0],
+  ["LA/SJC", "Sydney", 75.0],
+  ["NYC/Ashburn", "LA/SJC", 32.0],
+  ["NYC/Ashburn", "Dallas", 18.0],
+  ["Dallas", "LA/SJC", 16.0],
+  ["London", "Frankfurt", 8.0],
+  ["Tokyo", "Singapore", 38.0],
+  ["Singapore", "Mumbai", 35.0],
+  ["Singapore", "Sydney", 48.0],
+  ["Tokyo", "Sydney", 58.0],
+  ["London", "Mumbai", 55.0],
+  ["London", "Singapore", 85.0],
+  ["Frankfurt", "Mumbai", 50.0],
+  ["London", "S\u00E3o Paulo", 95.0],
+  ["NYC/Ashburn", "S\u00E3o Paulo", 65.0],
+  ["Mumbai", "Sydney", 65.0],
+];
+
+function haversineKm(p1, p2) {
+  const R = 6371.0;
+  const toRad = d => d * PI / 180.0;
+  const dLat = toRad(p2.lat - p1.lat);
+  const dLng = toRad(p2.lng - p1.lng);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(p1.lat)) * Math.cos(toRad(p2.lat)) * Math.sin(dLng / 2) ** 2;
+  return R * 2.0 * Math.atan2(Math.sqrt(a), Math.sqrt(1.0 - a));
+}
+
+function getCrossingPenalty(hub1, hub2) {
+  for (const [h1, h2, ms] of CROSSING_PENALTIES) {
+    if ((h1 === hub1 && h2 === hub2) || (h2 === hub1 && h1 === hub2)) return ms;
+  }
+  return null;
+}
+
+function nearestHub(lat, lng) {
+  const p = { lat, lng };
+  let best = null, bestDist = Infinity;
+  for (const hub of NETWORK_HUBS) {
+    const d = haversineKm(p, { lat: hub.lat, lng: hub.lng });
+    if (d < bestDist) { best = hub; bestDist = d; }
+  }
+  return { hub: best, dist: bestDist };
+}
+
+// Rust-accurate deterministic latency (latency.rs)
+function estimateLatencyMs(origin, dest) {
+  const directDist = haversineKm(origin, dest);
+  if (directDist < 200.0) return Math.max(Math.round(5.0 + directDist * 0.01), 4.0);
+
+  const srcHub = nearestHub(origin.lat, origin.lng);
+  const dstHub = nearestHub(dest.lat, dest.lng);
+  const srcLastMile = srcHub.dist * 0.008 + 3.0;
+  const dstLastMile = dstHub.dist * 0.008 + 3.0;
+
+  let hubToHub;
+  if (srcHub.hub.name === dstHub.hub.name) {
+    hubToHub = 2.0;
+  } else {
+    const known = getCrossingPenalty(srcHub.hub.name, dstHub.hub.name);
+    if (known !== null) {
+      hubToHub = known;
+    } else {
+      const srcLng = srcHub.hub.lng, dstLng = dstHub.hub.lng;
+      const crossAtl = (srcLng < -30 && dstLng > -20) || (srcLng > -20 && dstLng < -30);
+      const crossPac = (srcLng < -100 && dstLng > 100) || (srcLng > 100 && dstLng < -100);
+      const hubDist = haversineKm(
+        { lat: srcHub.hub.lat, lng: srcHub.hub.lng },
+        { lat: dstHub.hub.lat, lng: dstHub.hub.lng }
+      );
+      const fiberRatio = (crossAtl || crossPac) ? 1.4 : 1.25;
+      hubToHub = hubDist * fiberRatio / 200.0;
+      if (crossAtl) hubToHub += 8.0;
+      if (crossPac) hubToHub += 12.0;
+    }
+  }
+
+  const hops = (srcHub.hub.name === dstHub.hub.name) ? 0 : 1;
+  const total = srcLastMile + hubToHub + dstLastMile + hops * 3.0;
+  return Math.max(Math.round(total), 4.0);
+}
+
+// JSX-style latency with jitter (for live simulation)
+function simulateLatencyJitter(origin, dest) {
+  const directDist = haversineKm(origin, dest);
+  if (directDist < 200) return Math.round(5 + directDist * 0.01 + Math.random() * 4);
+  const srcHub = nearestHub(origin.lat, origin.lng);
+  const dstHub = nearestHub(dest.lat, dest.lng);
+  const srcLastMile = srcHub.dist * 0.008 + 3;
+  const dstLastMile = dstHub.dist * 0.008 + 3;
+  let hubToHub;
+  if (srcHub.hub.name === dstHub.hub.name) {
+    hubToHub = 2;
+  } else {
+    const known = getCrossingPenalty(srcHub.hub.name, dstHub.hub.name);
+    if (known !== null) {
+      hubToHub = known;
+    } else {
+      const srcLng = srcHub.hub.lng, dstLng = dstHub.hub.lng;
+      const crossAtl = (srcLng < -30 && dstLng > -20) || (srcLng > -20 && dstLng < -30);
+      const crossPac = (srcLng < -100 && dstLng > 100) || (srcLng > 100 && dstLng < -100);
+      const hubDist = haversineKm({ lat: srcHub.hub.lat, lng: srcHub.hub.lng }, { lat: dstHub.hub.lat, lng: dstHub.hub.lng });
+      const fiberRatio = (crossAtl || crossPac) ? 1.4 : 1.25;
+      hubToHub = hubDist * fiberRatio / 200;
+      if (crossAtl) hubToHub += 8;
+      if (crossPac) hubToHub += 12;
+    }
+  }
+  const hops = srcHub.hub.name === dstHub.hub.name ? 0 : 1;
+  const total = srcLastMile + hubToHub + dstLastMile + hops * 3;
+  const jitter = total * (Math.random() * 0.16 - 0.08);
+  return Math.round(Math.max(4, total + jitter));
+}
+
+function latencyBreakdown(origin, dest) {
+  const directDist = haversineKm(origin, dest);
+  if (directDist < 200) return { type: 'short', directDist, totalMs: Math.max(Math.round(5.0 + directDist * 0.01), 4.0) };
+  const srcHub = nearestHub(origin.lat, origin.lng);
+  const dstHub = nearestHub(dest.lat, dest.lng);
+  const srcLastMile = srcHub.dist * 0.008 + 3.0;
+  const dstLastMile = dstHub.dist * 0.008 + 3.0;
+  let hubToHub, hubMethod;
+  if (srcHub.hub.name === dstHub.hub.name) { hubToHub = 2; hubMethod = 'same-hub'; }
+  else {
+    const known = getCrossingPenalty(srcHub.hub.name, dstHub.hub.name);
+    if (known !== null) { hubToHub = known; hubMethod = 'known-rtt'; }
+    else {
+      hubMethod = 'estimated';
+      const sL = srcHub.hub.lng, dL = dstHub.hub.lng;
+      const cA = (sL < -30 && dL > -20) || (sL > -20 && dL < -30);
+      const cP = (sL < -100 && dL > 100) || (sL > 100 && dL < -100);
+      const hd = haversineKm({ lat: srcHub.hub.lat, lng: srcHub.hub.lng }, { lat: dstHub.hub.lat, lng: dstHub.hub.lng });
+      hubToHub = hd * ((cA || cP) ? 1.4 : 1.25) / 200;
+      if (cA) hubToHub += 8; if (cP) hubToHub += 12;
+    }
+  }
+  const hops = srcHub.hub.name === dstHub.hub.name ? 0 : 1;
+  const total = srcLastMile + hubToHub + dstLastMile + hops * 3;
+  return {
+    type: 'routed', directDist, srcHub: srcHub.hub.name, srcHubDist: srcHub.dist, srcLastMile,
+    dstHub: dstHub.hub.name, dstHubDist: dstHub.dist, dstLastMile, hubToHub, hubMethod,
+    peeringOverhead: hops * 3, totalMs: Math.max(Math.round(total), 4.0),
+  };
+}
+
+// ── Carbon Simulation (carbon.rs exact port) ────────────────
+
+// Rust-accurate deterministic
+function simulateCarbon(baseCar, powerType, hour) {
+  switch (powerType) {
+    case 'renewable': return Math.max(baseCar, 0.0);
+    case 'ccs': return baseCar + 5.0;
+    case 'grid': case 'hybrid': {
+      const tm = 0.7 + 0.6 * Math.sin(((hour - 6.0) / 24.0) * PI * 2.0);
+      return Math.max(baseCar * tm, 50.0);
+    }
+    default: return baseCar;
+  }
+}
+
+// JSX-style with jitter (for live simulation)
+function simulateCarbonJitter(baseCar, powerType) {
+  const hour = new Date().getHours();
+  if (powerType === 'renewable') return Math.max(0, baseCar + (Math.random() - 0.5) * 10);
+  if (powerType === 'ccs') return baseCar + (Math.random() - 0.3) * 20;
+  const tm = 0.7 + 0.6 * Math.sin(((hour - 6) / 24) * PI * 2);
+  return Math.max(50, baseCar * tm + (Math.random() - 0.5) * 80);
+}
+
+function simulateLoad(status) {
+  if (status !== 'operational' && status !== 'phase1_operational') return 0;
+  return Math.round(30 + Math.random() * 60);
+}
+
+function isGb(lat, lng) { return lat >= 49.9 && lat <= 60.9 && lng >= -8.2 && lng <= 1.8; }
+
+// ── Scoring (router.rs exact port) ──────────────────────────
+
+function scoreBackend(carbon, latencyMs, loadPct, weights) {
+  const score = weights.carbon * (carbon / 500) + weights.latency * (latencyMs / 300) + weights.cost * (loadPct / 100);
+  return Math.round(score * 1000) / 1000;
+}
+
+function selectBackend(snapshots, weights) {
+  const candidates = snapshots.map(s => ({
+    ...s,
+    score: scoreBackend(s.carbon, s.latencyMs, s.loadPct, weights),
+    carbonNorm: s.carbon / 500, latencyNorm: s.latencyMs / 300, costNorm: s.loadPct / 100,
+  }));
+  candidates.sort((a, b) => a.score - b.score);
+  const best = candidates.find(c => c.healthy);
+  return { candidates, bestId: best ? best.id : null };
+}
+
+// ── Visual helpers from JSX ─────────────────────────────────
+
+function carbonColor(val) {
+  if (val <= 20) return "#00e5a0";
+  if (val <= 60) return "#34d399";
+  if (val <= 150) return "#fbbf24";
+  if (val <= 300) return "#f97316";
+  return "#ef4444";
+}
+
+function carbonGrade(val) {
+  if (val <= 20) return "A+";
+  if (val <= 60) return "A";
+  if (val <= 150) return "B";
+  if (val <= 300) return "C";
+  return "D";
+}
+
+const STATUS_LABELS = { operational: "Live", phase1_operational: "Phase 1", coming_2026: "2026", approved_2027: "2027", planned: "Planned" };
+const STATUS_COLORS = { operational: "#00e5a0", phase1_operational: "#7dd3fc", coming_2026: "#fbbf24", approved_2027: "#f97316", planned: "#94a3b8" };
+const POWER_ICONS = { renewable: "\u26A1", hybrid: "\uD83D\uDD04", grid: "\uD83D\uDD0C", ccs: "\uD83C\uDFED" };
+
+function powerColor(pt) {
+  switch (pt) {
+    case 'renewable': return '#00e5a0';
+    case 'ccs': return '#0ea5e9';
+    case 'hybrid': return '#f59e0b';
+    case 'grid': return '#f97316';
+    default: return '#94a3b8';
+  }
+}
+
+// ── All 9 Backends (from config.toml + JSX metadata) ────────
+
+const BACKENDS = [
+  { id: "eu-iceland1-a", name: "ICE02 Keflav\u00EDk", country: "Iceland", lat: 64.0, lng: -22.5, power: "100% Geothermal + Hydro", capacity_mw: 80, gpus: ["GB200 NVL72","A100","H100"], status: "operational", baseCar: 12.0, powerType: "renewable", zone: "IS", carbonSource: "auto" },
+  { id: "eu-norway1-a", name: "Polar DRA01", country: "Norway", lat: 59.5, lng: 10.5, power: "100% Hydroelectric", capacity_mw: 52, gpus: [], status: "coming_2026", baseCar: 18.0, powerType: "renewable", zone: "NO-NO1", carbonSource: "auto" },
+  { id: "us-east1-a", name: "Equinix Culpeper", country: "US", lat: 38.47, lng: -78.0, power: "Grid + Renewable Purchases", capacity_mw: 5, gpus: [], status: "operational", baseCar: 340.0, powerType: "grid", zone: "US-MIDA-PJM", carbonSource: "auto" },
+  { id: "us-southcentral1-a", name: "Digital Realty TX", country: "US", lat: 32.78, lng: -96.8, power: "ERCOT Grid", capacity_mw: null, gpus: [], status: "operational", baseCar: 380.0, powerType: "grid", zone: "US-TEX-ERCO", carbonSource: "auto" },
+  { id: "us-northcentral1-a", name: "US North Central", country: "US", lat: 46.8, lng: -110.3, power: "Grid-connected", capacity_mw: null, gpus: [], status: "operational", baseCar: 290.0, powerType: "grid", zone: "US-NW-NWMT", carbonSource: "auto" },
+  { id: "us-tx-abilene", name: "Abilene Lancium (Stargate)", country: "US", lat: 32.35, lng: -99.8, power: "ERCOT Wind/Solar + Gas Backup", capacity_mw: 1200, gpus: ["GB200 NVL72"], status: "phase1_operational", baseCar: 180.0, powerType: "hybrid", zone: "US-TEX-ERCO", carbonSource: "auto" },
+  { id: "us-nv-sparks", name: "Redwood Spark", country: "US", lat: 39.53, lng: -119.75, power: "100% Off-grid Solar + Battery", capacity_mw: 1, gpus: ["A100","B200"], status: "operational", baseCar: 0.0, powerType: "renewable", zone: "US-NW-PACW", carbonSource: "auto" },
+  { id: "us-wy-cheyenne", name: "Project Jade (Cheyenne)", country: "US", lat: 41.1, lng: -104.8, power: "Gas + CCS (~95% capture)", capacity_mw: 2700, gpus: [], status: "approved_2027", baseCar: 45.0, powerType: "ccs", zone: "US-NW-WACM", carbonSource: "auto" },
+  { id: "ca-ab-calgary", name: "Myers Energy Park", country: "Canada", lat: 51.05, lng: -114.07, power: "Gas CCGT + CCS (~95%)", capacity_mw: 170, gpus: [], status: "planned", baseCar: 50.0, powerType: "ccs", zone: "CA-AB", carbonSource: "auto" },
+];
+
+const ORIGIN_PRESETS = [
+  { name: "Dublin", lat: 53.35, lng: -6.26, flag: "\uD83C\uDDEE\uD83C\uDDEA" },
+  { name: "London", lat: 51.51, lng: -0.13, flag: "\uD83C\uDDEC\uD83C\uDDE7" },
+  { name: "New York", lat: 40.71, lng: -74.01, flag: "\uD83C\uDDFA\uD83C\uDDF8" },
+  { name: "San Francisco", lat: 37.77, lng: -122.42, flag: "\uD83C\uDDFA\uD83C\uDDF8" },
+  { name: "Tokyo", lat: 35.68, lng: 139.69, flag: "\uD83C\uDDEF\uD83C\uDDF5" },
+  { name: "S\u00E3o Paulo", lat: -23.55, lng: -46.63, flag: "\uD83C\uDDE7\uD83C\uDDF7" },
+  { name: "Singapore", lat: 1.35, lng: 103.82, flag: "\uD83C\uDDF8\uD83C\uDDEC" },
+  { name: "Sydney", lat: -33.87, lng: 151.21, flag: "\uD83C\uDDE6\uD83C\uDDFA" },
+  { name: "Berlin", lat: 52.52, lng: 13.41, flag: "\uD83C\uDDE9\uD83C\uDDEA" },
+  { name: "Mumbai", lat: 19.08, lng: 72.88, flag: "\uD83C\uDDEE\uD83C\uDDF3" },
+];
+
+// ── Mercator Projection (from JSX) ──────────────────────────
+
+const MAP_W = 440, MAP_H = 240, MAP_VIEW_H = 175;
+
+function lngToX(lng) { return ((lng + 180) / 360) * MAP_W; }
+function latToY(lat) {
+  const latRad = (lat * PI) / 180;
+  const mercN = Math.log(Math.tan(PI / 4 + latRad / 2));
+  return (MAP_H / 2) - (MAP_H * mercN) / (2 * PI);
+}
+
+// ── Great-Circle Arc Paths (from JSX) ───────────────────────
+
+function gcArcPaths(lat1d, lng1d, lat2d, lng2d) {
+  const toRad = d => d * PI / 180, toDeg = r => r * 180 / PI;
+  const la1 = toRad(lat1d), lo1 = toRad(lng1d), la2 = toRad(lat2d), lo2 = toRad(lng2d);
+  const d = 2 * Math.asin(Math.sqrt(Math.sin((la2 - la1) / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin((lo2 - lo1) / 2) ** 2));
+  const steps = Math.max(4, Math.round(d * 30));
+  const rawPts = [];
+  for (let i = 0; i <= steps; i++) {
+    const f = i / steps;
+    if (d < 0.001) {
+      rawPts.push({ lng: lng1d + f * (lng2d - lng1d), lat: lat1d + f * (lat2d - lat1d) });
+    } else {
+      const A = Math.sin((1 - f) * d) / Math.sin(d), B = Math.sin(f * d) / Math.sin(d);
+      const x = A * Math.cos(la1) * Math.cos(lo1) + B * Math.cos(la2) * Math.cos(lo2);
+      const y = A * Math.cos(la1) * Math.sin(lo1) + B * Math.cos(la2) * Math.sin(lo2);
+      const z = A * Math.sin(la1) + B * Math.sin(la2);
+      rawPts.push({ lat: toDeg(Math.atan2(z, Math.sqrt(x * x + y * y))), lng: toDeg(Math.atan2(y, x)) });
+    }
+  }
+  const subPaths = [[]];
+  for (let i = 0; i < rawPts.length; i++) {
+    const p = rawPts[i];
+    if (i > 0 && Math.abs(p.lng - rawPts[i - 1].lng) > 180) subPaths.push([]);
+    subPaths[subPaths.length - 1].push({ x: lngToX(p.lng), y: latToY(p.lat) });
+  }
+  return subPaths.filter(s => s.length >= 2).map(pts =>
+    pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ')
+  );
+}
+
+function getNetworkRoute(oLat, oLng, rLat, rLng) {
+  if (haversineKm({ lat: oLat, lng: oLng }, { lat: rLat, lng: rLng }) < 200) return null;
+  const src = nearestHub(oLat, oLng), dst = nearestHub(rLat, rLng);
+  if (src.hub.name === dst.hub.name) return { srcHub: src.hub, dstHub: null };
+  return { srcHub: src.hub, dstHub: dst.hub };
+}
+
+// ── Continent Polygons (from JSX) ───────────────────────────
+
+const CONTINENTS = [
+  [[-130,55],[-135,60],[-140,62],[-150,63],[-165,64],[-168,66],[-165,70],[-155,72],[-130,72],[-115,70],[-100,68],[-90,65],[-85,62],[-80,60],[-75,55],[-65,48],[-67,44],[-70,42],[-72,41],[-75,38],[-78,35],[-80,32],[-82,30],[-85,29],[-88,30],[-90,29],[-92,29],[-95,28],[-97,26],[-100,24],[-105,22],[-110,24],[-115,28],[-118,33],[-120,35],[-122,37],[-124,40],[-124,43],[-124,46],[-126,50],[-128,52],[-130,55]],
+  [[-100,20],[-97,18],[-95,17],[-92,16],[-90,15],[-88,14],[-85,12],[-83,10],[-82,9],[-80,8],[-78,9],[-80,10],[-82,12],[-84,14],[-86,16],[-88,18],[-90,20],[-92,20],[-95,20],[-100,20]],
+  [[-80,10],[-77,8],[-73,11],[-70,12],[-65,10],[-60,7],[-55,5],[-52,3],[-50,0],[-50,-3],[-48,-6],[-46,-8],[-42,-10],[-38,-12],[-36,-15],[-38,-18],[-40,-20],[-42,-22],[-44,-23],[-46,-24],[-48,-26],[-50,-28],[-52,-30],[-53,-33],[-55,-35],[-58,-38],[-62,-40],[-65,-42],[-67,-46],[-68,-50],[-70,-52],[-72,-50],[-74,-46],[-74,-42],[-72,-38],[-70,-35],[-70,-30],[-71,-27],[-70,-23],[-70,-18],[-75,-15],[-76,-12],[-78,-8],[-80,-3],[-80,0],[-78,3],[-77,5],[-78,8],[-80,10]],
+  [[-10,36],[-8,38],[-9,40],[-8,42],[-5,44],[-2,44],[0,43],[3,43],[5,44],[2,47],[0,48],[-3,48],[-5,50],[-3,52],[-5,54],[-3,56],[0,56],[5,54],[8,54],[10,56],[12,55],[14,54],[16,54],[18,55],[20,54],[22,55],[24,55],[26,56],[28,57],[30,60],[28,62],[25,64],[20,64],[18,66],[15,68],[12,68],[10,66],[8,64],[6,62],[5,60],[4,58],[3,56],[2,54],[0,52],[-2,50],[-5,48],[-8,46],[-10,44],[-10,40],[-10,36]],
+  [[-6,50],[-5,52],[-4,54],[-5,56],[-6,58],[-5,58],[-3,58],[-2,56],[0,54],[1,52],[0,51],[-2,50],[-4,50],[-6,50]],
+  [[5,58],[8,58],[10,60],[12,62],[14,64],[15,66],[16,68],[18,70],[22,70],[26,70],[30,70],[30,68],[28,66],[24,64],[20,62],[18,60],[16,58],[12,56],[10,56],[8,56],[5,58]],
+  [[-15,12],[-17,15],[-16,18],[-14,22],[-10,26],[-8,30],[-5,34],[-2,35],[2,36],[5,37],[8,37],[10,36],[12,34],[15,32],[20,32],[25,30],[28,31],[30,30],[32,30],[34,31],[36,32],[38,30],[40,28],[42,25],[44,22],[46,18],[48,14],[50,12],[48,8],[46,5],[44,2],[42,0],[40,-2],[38,-5],[36,-8],[35,-12],[34,-15],[35,-20],[34,-24],[32,-26],[30,-28],[28,-32],[26,-33],[22,-34],[18,-34],[16,-30],[14,-26],[12,-22],[12,-18],[10,-14],[8,-10],[6,-6],[5,-2],[4,2],[3,5],[2,8],[0,10],[-5,10],[-8,8],[-12,8],[-15,12]],
+  [[35,32],[36,34],[38,36],[40,38],[42,38],[44,36],[46,38],[48,38],[50,36],[52,34],[54,32],[56,26],[56,24],[55,22],[52,18],[50,16],[48,14],[46,14],[44,16],[42,18],[40,20],[38,24],[36,28],[35,32]],
+  [[68,24],[70,28],[72,30],[74,34],[76,35],[78,34],[80,32],[82,30],[84,28],[86,28],[88,26],[90,22],[92,20],[90,18],[88,16],[86,14],[84,12],[82,10],[80,8],[78,8],[76,10],[74,12],[72,16],[70,20],[68,24]],
+  [[80,42],[82,44],[86,48],[90,50],[95,52],[100,54],[105,56],[110,58],[115,60],[120,62],[125,64],[130,62],[135,58],[138,56],[140,52],[142,48],[140,44],[138,40],[136,36],[134,34],[130,32],[126,34],[124,36],[122,38],[120,40],[118,38],[116,36],[114,34],[112,30],[110,26],[108,22],[106,18],[104,14],[102,10],[100,8],[98,10],[96,14],[94,18],[92,22],[88,24],[84,28],[82,32],[80,36],[80,42]],
+  [[130,31],[132,33],[134,35],[136,36],[138,38],[140,40],[142,42],[144,44],[145,44],[144,42],[142,40],[140,38],[138,36],[136,34],[134,32],[132,30],[130,31]],
+  [[96,6],[98,4],[100,2],[102,0],[104,-2],[106,-4],[108,-6],[110,-8],[112,-8],[114,-6],[116,-8],[118,-8],[120,-6],[122,-8],[124,-8],[126,-6],[128,-4],[130,-2],[132,-2],[134,-4],[136,-6],[138,-6],[140,-4],[140,-2],[138,0],[136,2],[134,2],[132,0],[130,0],[128,2],[126,2],[124,4],[122,4],[120,2],[118,2],[116,4],[114,4],[112,2],[110,2],[108,4],[106,4],[104,4],[102,4],[100,4],[98,6],[96,6]],
+  [[114,-14],[116,-16],[118,-18],[120,-20],[122,-22],[124,-24],[126,-26],[128,-28],[130,-30],[132,-32],[134,-34],[136,-35],[138,-36],[140,-38],[142,-38],[144,-38],[146,-38],[148,-36],[150,-34],[152,-32],[153,-28],[152,-24],[150,-20],[148,-18],[146,-16],[144,-14],[142,-12],[140,-12],[138,-14],[136,-14],[134,-12],[132,-12],[130,-14],[128,-14],[126,-16],[124,-16],[122,-14],[120,-14],[118,-14],[116,-14],[114,-14]],
+  [[166,-35],[168,-37],[170,-40],[172,-42],[174,-44],[174,-46],[172,-46],[170,-44],[168,-42],[166,-40],[166,-38],[166,-35]],
+  [[30,58],[35,60],[40,62],[45,64],[50,66],[55,68],[60,68],[65,70],[70,72],[80,72],[90,74],[100,74],[110,72],[120,70],[130,68],[140,66],[150,64],[155,62],[160,60],[165,62],[170,66],[175,68],[180,68],[180,58],[170,55],[160,52],[150,50],[140,48],[130,50],[120,52],[110,54],[100,52],[90,50],[80,48],[70,50],[60,55],[50,56],[40,56],[35,58],[30,58]],
+  [[-55,60],[-50,62],[-45,64],[-40,66],[-35,68],[-28,72],[-22,76],[-18,78],[-20,80],[-25,82],[-32,83],[-40,82],[-48,80],[-52,76],[-55,72],[-58,68],[-58,64],[-55,60]],
+  [[-24,64],[-22,65],[-18,66],[-14,66],[-13,65],[-15,63],[-18,63],[-22,63],[-24,64]],
+];
+
+function pointInPoly(px, py, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+// Pre-compute land dots
+let _landDots = null;
+function getLandDots() {
+  if (_landDots) return _landDots;
+  const dots = [], STEP = 5;
+  for (let sy = 8; sy < MAP_VIEW_H - 4; sy += STEP) {
+    for (let sx = 4; sx < MAP_W - 4; sx += STEP) {
+      const lng = (sx / MAP_W) * 360 - 180;
+      const mercN = ((MAP_H / 2 - sy) * 2 * PI) / MAP_H;
+      const lat = (2 * Math.atan(Math.exp(mercN)) - PI / 2) * (180 / PI);
+      if (lat < -60 || lat > 78) continue;
+      if (CONTINENTS.some(poly => pointInPoly(lng, lat, poly))) dots.push({ x: sx, y: sy });
+    }
+  }
+  _landDots = dots;
+  return dots;
+}
+
+// ── Ternary Triangle ────────────────────────────────────────
+
+const TRI_SIZE = 220, TRI_PAD = 44;
+const TRI_CX = TRI_SIZE / 2 + TRI_PAD;
+const TRI_HT = TRI_SIZE * Math.sqrt(3) / 2;
+const TRI_SVG_W = TRI_SIZE + TRI_PAD * 2;
+const TRI_SVG_H = TRI_HT + TRI_PAD * 2;
+
+const vCarbon = { x: TRI_CX, y: TRI_PAD };
+const vLatency = { x: TRI_PAD, y: TRI_PAD + TRI_HT };
+const vCost = { x: TRI_PAD + TRI_SIZE, y: TRI_PAD + TRI_HT };
+
+function triToXY(wC, wL, wCo) {
+  return { x: wC * vCarbon.x + wL * vLatency.x + wCo * vCost.x, y: wC * vCarbon.y + wL * vLatency.y + wCo * vCost.y };
+}
+
+function toBarycentric(px, py) {
+  const v0x = vLatency.x - vCost.x, v0y = vLatency.y - vCost.y;
+  const v1x = vCarbon.x - vCost.x, v1y = vCarbon.y - vCost.y;
+  const v2x = px - vCost.x, v2y = py - vCost.y;
+  const d00 = v0x*v0x+v0y*v0y, d01 = v0x*v1x+v0y*v1y, d02 = v0x*v2x+v0y*v2y;
+  const d11 = v1x*v1x+v1y*v1y, d12 = v1x*v2x+v1y*v2y;
+  const inv = 1/(d00*d11-d01*d01);
+  let u = Math.max(0,Math.min(1,(d11*d02-d01*d12)*inv));
+  let v = Math.max(0,Math.min(1,(d00*d12-d01*d02)*inv));
+  let w = 1-u-v;
+  if (w < 0) { const s = u+v; u /= s; v /= s; w = 0; }
+  return { carbon: v, latency: u, cost: w };
+}
+
+// ── Application State ───────────────────────────────────────
+
+const state = {
+  weights: { carbon: 0.7, latency: 0.2, cost: 0.1 },
+  hour: new Date().getUTCHours(),
+  liveTime: true,
+  carbonSource: 'simulated',
+  autoRefresh: true,
+  origin: ORIGIN_PRESETS[0], // Dublin
+  selectedId: null,
+  selectedCard: null,
+  routeHistory: [],
+  // Live simulation data (with jitter, refreshed every 5s)
+  regionData: [],
+};
+
+// ── Initialize region data ──────────────────────────────────
+
+function refreshRegionData() {
+  const origin = state.origin;
+  state.regionData = BACKENDS.map(b => {
+    const isOnline = b.status === 'operational' || b.status === 'phase1_operational';
+    let carbon, latency, load;
+    if (state.autoRefresh) {
+      carbon = Math.round(simulateCarbonJitter(b.baseCar, b.powerType));
+      latency = isOnline ? simulateLatencyJitter(origin, { lat: b.lat, lng: b.lng }) : 0;
+      load = simulateLoad(b.status);
+    } else {
+      carbon = Math.round(simulateCarbon(b.baseCar, b.powerType, state.hour) * 10) / 10;
+      latency = isOnline ? estimateLatencyMs(origin, { lat: b.lat, lng: b.lng }) : 0;
+      load = isOnline ? 50 : 0;
+    }
+    return { ...b, currentCarbon: carbon, latency, load, healthy: isOnline };
+  });
+}
+
+// ── Scoring with region data ────────────────────────────────
+
+function getSnapshots() {
+  return state.regionData.map(r => ({
+    id: r.id, name: r.name, healthy: r.healthy,
+    carbon: r.currentCarbon, latencyMs: r.latency,
+    loadPct: r.load,
+  }));
+}
+
+// ── Render: Origin Map ──────────────────────────────────────
+
+function renderMap() {
+  const svg = document.getElementById('map-svg');
+  const regions = state.regionData;
+  const snapshots = getSnapshots();
+  const { candidates, bestId } = selectBackend(snapshots, state.weights);
+  const origin = state.origin;
+  const originX = lngToX(origin.lng), originY = latToY(origin.lat);
+
+  let s = '';
+  s += `<rect x="0" y="0" width="${MAP_W}" height="${MAP_VIEW_H}" fill="#080c14" rx="8"/>`;
+
+  // Grid lines
+  [-60,-30,0,30,60].forEach(lat => {
+    const y = latToY(lat);
+    if (y > 0 && y < MAP_VIEW_H) s += `<line x1="0" y1="${y}" x2="${MAP_W}" y2="${y}" stroke="#0f1520" stroke-width="0.5"/>`;
+  });
+  [-150,-120,-90,-60,-30,0,30,60,90,120,150].forEach(lng => {
+    const x = lngToX(lng);
+    s += `<line x1="${x}" y1="0" x2="${x}" y2="${MAP_VIEW_H}" stroke="#0f1520" stroke-width="0.5"/>`;
+  });
+
+  // Land dots
+  getLandDots().forEach(d => {
+    s += `<circle cx="${d.x}" cy="${d.y}" r="1.2" fill="#1e3048"/>`;
+  });
+
+  // Great-circle arcs for non-best operational routes
+  regions.filter(r => (r.status === 'operational' || r.status === 'phase1_operational') && r.id !== bestId).forEach(r => {
+    gcArcPaths(origin.lat, origin.lng, r.lat, r.lng).forEach(pathD => {
+      s += `<path d="${pathD}" fill="none" stroke="#1e293b" stroke-width="0.5" stroke-dasharray="3,3" opacity="0.3"/>`;
+    });
+  });
+
+  // Network route for best region (hub-to-hub visualization)
+  const best = regions.find(r => r.id === bestId);
+  if (best) {
+    const route = getNetworkRoute(origin.lat, origin.lng, best.lat, best.lng);
+    const waypoints = [{ lat: origin.lat, lng: origin.lng, type: 'origin' }];
+    if (route) {
+      waypoints.push({ lat: route.srcHub.lat, lng: route.srcHub.lng, type: 'hub', name: route.srcHub.name });
+      if (route.dstHub) waypoints.push({ lat: route.dstHub.lat, lng: route.dstHub.lng, type: 'hub', name: route.dstHub.name });
+    }
+    waypoints.push({ lat: best.lat, lng: best.lng, type: 'dc' });
+
+    // Draw segments
+    for (let i = 0; i < waypoints.length - 1; i++) {
+      const w1 = waypoints[i], w2 = waypoints[i + 1];
+      const isLastMile = i === 0 || i === waypoints.length - 2;
+      gcArcPaths(w1.lat, w1.lng, w2.lat, w2.lng).forEach(pathD => {
+        s += `<path d="${pathD}" fill="none" stroke="#00e5a0" stroke-width="${isLastMile ? 0.8 : 1.5}" stroke-dasharray="${isLastMile ? '2,2' : 'none'}" opacity="${isLastMile ? 0.5 : 0.85}"/>`;
+      });
+    }
+
+    // Hub diamonds
+    waypoints.filter(w => w.type === 'hub').forEach(h => {
+      const hx = lngToX(h.lng), hy = latToY(h.lat);
+      const sz = 3;
+      s += `<polygon points="${hx},${hy-sz} ${hx+sz},${hy} ${hx},${hy+sz} ${hx-sz},${hy}" fill="#0a0e17" stroke="#00e5a080" stroke-width="0.8"/>`;
+      s += `<polygon points="${hx},${hy-1.5} ${hx+1.5},${hy} ${hx},${hy+1.5} ${hx-1.5},${hy}" fill="#00e5a050"/>`;
+      s += `<text x="${hx}" y="${hy-sz-3}" text-anchor="middle" fill="#00e5a060" font-size="3.8" font-family="monospace">${h.name}</text>`;
+    });
+  }
+
+  // DC markers
+  regions.forEach(r => {
+    const cx = lngToX(r.lng), cy = latToY(r.lat);
+    const isOnline = r.status === 'operational' || r.status === 'phase1_operational';
+    const isBest = r.id === bestId;
+    const color = isOnline ? carbonColor(r.currentCarbon) : STATUS_COLORS[r.status];
+    if (isBest) {
+      s += `<circle cx="${cx}" cy="${cy}" r="8" fill="none" stroke="#00e5a0" stroke-width="0.8" opacity="0.4"><animate attributeName="r" from="6" to="14" dur="2s" repeatCount="indefinite"/><animate attributeName="opacity" from="0.6" to="0" dur="2s" repeatCount="indefinite"/></circle>`;
+    }
+    s += `<circle cx="${cx}" cy="${cy}" r="${isBest ? 4.5 : 3}" fill="${color}" stroke="#0a0e17" stroke-width="1" opacity="${isOnline ? 1 : 0.4}" data-backend="${r.id}" class="map-pin" style="cursor:pointer"/>`;
+    const label = r.name.length > 12 ? r.name.split(' ')[0] : r.name;
+    s += `<text x="${cx}" y="${cy-7}" text-anchor="middle" fill="${isOnline ? '#94a3b8' : '#475569'}" font-size="4.5" font-family="monospace">${label}</text>`;
+  });
+
+  // Origin marker with animated pulse
+  s += `<circle cx="${originX}" cy="${originY}" r="5" fill="none" stroke="#f472b6" stroke-width="1.5"><animate attributeName="r" from="4" to="12" dur="1.5s" repeatCount="indefinite"/><animate attributeName="opacity" from="0.8" to="0" dur="1.5s" repeatCount="indefinite"/></circle>`;
+  s += `<circle cx="${originX}" cy="${originY}" r="4" fill="#f472b6" stroke="#0a0e17" stroke-width="1.5"/>`;
+  s += `<text x="${originX}" y="${originY-9}" text-anchor="middle" fill="#f472b6" font-size="5.5" font-weight="bold" font-family="monospace">ORIGIN</text>`;
+
+  svg.innerHTML = s;
+
+  // Click events on map pins
+  svg.querySelectorAll('.map-pin').forEach(pin => {
+    pin.addEventListener('click', e => {
+      e.stopPropagation();
+      state.selectedId = pin.dataset.backend;
+      state.selectedCard = pin.dataset.backend;
+      update();
+    });
+  });
+}
+
+// Map click-to-set-origin
+let mapDragging = false;
+function mapSetOrigin(e) {
+  const svg = document.getElementById('map-svg');
+  const rect = svg.getBoundingClientRect();
+  const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+  const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+  const svgX = (clientX - rect.left) * (MAP_W / rect.width);
+  const svgY = (clientY - rect.top) * (MAP_VIEW_H / rect.height);
+  const lng = (svgX / MAP_W) * 360 - 180;
+  const mercN = ((MAP_H / 2 - svgY) * 2 * PI) / MAP_H;
+  const lat = (2 * Math.atan(Math.exp(mercN)) - PI / 2) * (180 / PI);
+  if (lat < -60 || lat > 75) return;
+  state.origin = { name: `${lat.toFixed(1)}\u00B0, ${lng.toFixed(1)}\u00B0`, lat, lng, flag: "\uD83D\uDCCD" };
+  refreshRegionData();
+  update();
+}
+
+// ── Render: Ternary Triangle ────────────────────────────────
+
+function renderTernary() {
+  const svg = document.getElementById('ternary-svg');
+  const w = state.weights;
+  const pos = triToXY(w.carbon, w.latency, w.cost);
+
+  let s = '';
+  // Grid lines
+  for (let i = 1; i < 10; i++) {
+    const t = i / 10;
+    const lines = [
+      { x1: vCarbon.x*t+vLatency.x*(1-t), y1: vCarbon.y*t+vLatency.y*(1-t), x2: vCarbon.x*t+vCost.x*(1-t), y2: vCarbon.y*t+vCost.y*(1-t) },
+      { x1: vLatency.x*t+vCarbon.x*(1-t), y1: vLatency.y*t+vCarbon.y*(1-t), x2: vLatency.x*t+vCost.x*(1-t), y2: vLatency.y*t+vCost.y*(1-t) },
+      { x1: vCost.x*t+vCarbon.x*(1-t), y1: vCost.y*t+vCarbon.y*(1-t), x2: vCost.x*t+vLatency.x*(1-t), y2: vCost.y*t+vLatency.y*(1-t) },
+    ];
+    lines.forEach(l => { s += `<line x1="${l.x1}" y1="${l.y1}" x2="${l.x2}" y2="${l.y2}" stroke="#1a2438" stroke-width="0.5"/>`; });
+  }
+
+  // Triangle outline
+  s += `<polygon points="${vCarbon.x},${vCarbon.y} ${vLatency.x},${vLatency.y} ${vCost.x},${vCost.y}" fill="none" stroke="#2a3650" stroke-width="1.5"/>`;
+  // Edge colors
+  s += `<line x1="${vCarbon.x}" y1="${vCarbon.y}" x2="${vLatency.x}" y2="${vLatency.y}" stroke="#00e5a040" stroke-width="2"/>`;
+  s += `<line x1="${vCarbon.x}" y1="${vCarbon.y}" x2="${vCost.x}" y2="${vCost.y}" stroke="#00e5a040" stroke-width="2"/>`;
+  s += `<line x1="${vLatency.x}" y1="${vLatency.y}" x2="${vCost.x}" y2="${vCost.y}" stroke="#0ea5e940" stroke-width="2"/>`;
+
+  // Labels
+  s += `<text x="${vCarbon.x}" y="${vCarbon.y-14}" text-anchor="middle" fill="#00e5a0" font-size="10" font-weight="700" font-family="monospace">CARBON</text>`;
+  s += `<text x="${vCarbon.x}" y="${vCarbon.y-4}" text-anchor="middle" fill="#00e5a0" font-size="8" font-family="monospace">${Math.round(w.carbon*100)}%</text>`;
+  s += `<text x="${vLatency.x-4}" y="${vLatency.y+14}" text-anchor="middle" fill="#0ea5e9" font-size="10" font-weight="700" font-family="monospace">LATENCY</text>`;
+  s += `<text x="${vLatency.x-4}" y="${vLatency.y+24}" text-anchor="middle" fill="#0ea5e9" font-size="8" font-family="monospace">${Math.round(w.latency*100)}%</text>`;
+  s += `<text x="${vCost.x+4}" y="${vCost.y+14}" text-anchor="middle" fill="#f59e0b" font-size="10" font-weight="700" font-family="monospace">COST</text>`;
+  s += `<text x="${vCost.x+4}" y="${vCost.y+24}" text-anchor="middle" fill="#f59e0b" font-size="8" font-family="monospace">${Math.round(w.cost*100)}%</text>`;
+
+  // Cursor with animated pulse
+  s += `<circle cx="${pos.x}" cy="${pos.y}" r="10" fill="none" stroke="#f1f5f9" stroke-width="0.6" opacity="0.3"><animate attributeName="r" from="8" to="16" dur="2s" repeatCount="indefinite"/><animate attributeName="opacity" from="0.4" to="0" dur="2s" repeatCount="indefinite"/></circle>`;
+  s += `<circle cx="${pos.x}" cy="${pos.y}" r="7" fill="#0a0e17" stroke="#f1f5f9" stroke-width="1.5"/>`;
+  const cr = Math.round(w.latency*14), cg = Math.round(w.carbon*229+w.cost*158), cb = Math.round(w.carbon*160+w.latency*233+w.cost*11);
+  s += `<circle cx="${pos.x}" cy="${pos.y}" r="3" fill="rgb(${cr},${cg},${cb})"/>`;
+
+  svg.innerHTML = s;
+}
+
+function renderWeightBars() {
+  const w = state.weights;
+  const items = [
+    { el: 'wb-carbon', key: 'carbon', label: 'Carbon', color: '#00e5a0', icon: '\uD83C\uDF3F' },
+    { el: 'wb-latency', key: 'latency', label: 'Latency', color: '#0ea5e9', icon: '\u26A1' },
+    { el: 'wb-cost', key: 'cost', label: 'Load/Cost', color: '#f59e0b', icon: '\uD83D\uDCB0' },
+  ];
+  items.forEach(({ el, key, label, color, icon }) => {
+    document.getElementById(el).innerHTML = `
+      <label><span style="color:${color}">${icon} ${label}</span><span class="pct" style="color:${color}">${Math.round(w[key]*100)}%</span></label>
+      <div class="weight-track"><div class="weight-fill" style="width:${w[key]*100}%;background:${color}"></div></div>
+    `;
+  });
+}
+
+// ── Render: Best Route Banner ───────────────────────────────
+
+function renderBestBanner(bestId) {
+  const banner = document.getElementById('best-banner');
+  if (!bestId) { banner.style.display = 'none'; return; }
+  const r = state.regionData.find(rr => rr.id === bestId);
+  if (!r) return;
+  const snapshots = getSnapshots();
+  const { candidates } = selectBackend(snapshots, state.weights);
+  const c = candidates.find(cc => cc.id === bestId);
+  if (!c) return;
+
+  const cc = carbonColor(r.currentCarbon);
+  banner.style.display = 'flex';
+  banner.style.background = `linear-gradient(135deg, ${cc}10, #111927)`;
+  banner.style.border = `1px solid ${cc}40`;
+
+  banner.innerHTML = `
+    <div>
+      <div class="route-label">Optimal Route from ${state.origin.flag} ${state.origin.name} &rarr;</div>
+      <div class="route-name">${r.name}<span class="grade" style="background:${cc}20;color:${cc}">${carbonGrade(r.currentCarbon)}</span></div>
+    </div>
+    <div class="metrics">
+      <div class="metric"><div class="val" style="color:${cc}">${r.currentCarbon}</div><div class="lbl">gCO\u2082/kWh</div></div>
+      <div class="metric"><div class="val" style="color:#0ea5e9">${r.latency}ms</div><div class="lbl">latency</div></div>
+      <div class="metric"><div class="val" style="color:#f59e0b">${c.score}</div><div class="lbl">score</div></div>
+    </div>
+  `;
+}
+
+// ── Render: Region Cards ────────────────────────────────────
+
+function renderCards(bestId) {
+  const grid = document.getElementById('cards-grid');
+  const snapshots = getSnapshots();
+  const { candidates } = selectBackend(snapshots, state.weights);
+
+  grid.innerHTML = '';
+  state.regionData.forEach(r => {
+    const scored = candidates.find(c => c.id === r.id);
+    const isBest = r.id === bestId;
+    const isOnline = r.status === 'operational' || r.status === 'phase1_operational';
+    const isExpanded = state.selectedCard === r.id;
+
+    const card = document.createElement('div');
+    card.className = `region-card${isBest ? ' best' : ''}${!isOnline ? ' offline' : ''}`;
+    if (isBest) card.style.borderColor = `${carbonColor(r.currentCarbon)}60`;
+    if (isExpanded) card.style.borderColor = '#334155';
+
+    let html = '';
+    if (isBest) html += `<div class="best-tag" style="background:${carbonColor(r.currentCarbon)}">BEST</div>`;
+
+    html += `
+      <div class="card-header">
+        <div>
+          <div class="card-name">${POWER_ICONS[r.powerType]} ${r.name}</div>
+          <div class="card-id">${r.id}</div>
+        </div>
+        <span class="card-status" style="background:${STATUS_COLORS[r.status]}15;color:${STATUS_COLORS[r.status]}">${STATUS_LABELS[r.status]}</span>
+      </div>
+      <div class="card-power">${r.power}</div>
+    `;
+
+    if (isOnline) {
+      html += `<div class="card-metrics">
+        <div class="card-metric"><div class="val" style="color:${carbonColor(r.currentCarbon)}">${r.currentCarbon}</div><div class="lbl">gCO\u2082/kWh</div></div>
+        <div class="card-metric"><div class="val" style="color:#0ea5e9">${r.latency}</div><div class="lbl">ms</div></div>
+        <div class="card-metric"><div class="val" style="color:#f59e0b">${r.load}%</div><div class="lbl">load</div></div>
+        ${scored ? `<div class="card-metric score-metric"><div class="val" style="color:#94a3b8">${scored.score}</div><div class="lbl">score</div></div>` : ''}
+      </div>`;
+    }
+
+    if (isExpanded) {
+      html += `<div class="card-detail">
+        <div>Country: ${r.country}</div>
+        ${r.capacity_mw ? `<div>Capacity: ${r.capacity_mw} MW</div>` : ''}
+        ${r.gpus.length > 0 ? `<div>GPUs: ${r.gpus.join(', ')}</div>` : ''}
+        <div style="margin-top:6px;display:flex;align-items:center;gap:8px">
+          <span style="min-width:55px">Carbon</span>
+          <div class="carbon-bar-track"><div class="carbon-bar-fill" style="width:${Math.min(100,(r.currentCarbon/500)*100)}%;background:${carbonColor(r.currentCarbon)}"></div></div>
+        </div>
+      </div>`;
+    }
+
+    card.innerHTML = html;
+    card.addEventListener('click', () => {
+      state.selectedCard = state.selectedCard === r.id ? null : r.id;
+      state.selectedId = r.id;
+      update();
+    });
+    grid.appendChild(card);
+  });
+}
+
+// ── Render: Scoring Table ───────────────────────────────────
+
+function renderTable(candidates, bestId) {
+  const tbody = document.getElementById('score-tbody');
+  tbody.innerHTML = '';
+  candidates.forEach((c, i) => {
+    const tr = document.createElement('tr');
+    if (c.id === bestId) tr.classList.add('best-row');
+    if (!c.healthy) tr.classList.add('unhealthy-row');
+    tr.addEventListener('click', () => { state.selectedId = c.id; state.selectedCard = c.id; update(); });
+
+    const source = getSourceName(c);
+    tr.innerHTML = `
+      <td>${i+1}</td>
+      <td style="color:${c.id === bestId ? '#00e5a0' : '#f1f5f9'}">${c.id}</td>
+      <td>${c.name}</td>
+      <td>${c.carbon.toFixed(1)}</td><td class="norm">${c.carbonNorm.toFixed(3)}</td>
+      <td>${c.latencyMs}</td><td class="norm">${c.latencyNorm.toFixed(3)}</td>
+      <td>${c.loadPct.toFixed(0)}</td><td class="norm">${c.costNorm.toFixed(3)}</td>
+      <td class="score-val" style="color:${c.healthy ? carbonColor(500 - c.score * 400) : '#555'}">${c.score.toFixed(3)}</td>
+      <td style="font-size:10px;color:#64748b">${source}</td>
+      <td><span class="card-status" style="background:${c.healthy ? '#00e5a015' : '#ef444415'};color:${c.healthy ? '#00e5a0' : '#ef4444'}">${c.healthy ? 'OK' : 'DOWN'}</span></td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+function getSourceName(c) {
+  if (state.carbonSource === 'simulated') return 'simulated';
+  if (state.carbonSource !== 'auto') return state.carbonSource;
+  const b = BACKENDS.find(bb => bb.id === c.id);
+  if (b && isGb(b.lat, b.lng)) return 'uk_carbon_intensity';
+  return 'electricity_maps';
+}
+
+// ── Render: Detail Panel ────────────────────────────────────
+
+function renderDetail(candidates, bestId) {
+  const container = document.getElementById('detail-content');
+  const id = state.selectedId || bestId;
+  if (!id) { container.innerHTML = '<p style="color:#64748b;font-size:12px">Click a backend to inspect.</p>'; return; }
+
+  const c = candidates.find(cc => cc.id === id);
+  const b = BACKENDS.find(bb => bb.id === id);
+  if (!c || !b) return;
+
+  const origin = state.origin;
+  const breakdown = latencyBreakdown(origin, { lat: b.lat, lng: b.lng });
+  const source = getSourceName(c);
+  const carbonContrib = state.weights.carbon * c.carbonNorm;
+  const latencyContrib = state.weights.latency * c.latencyNorm;
+  const costContrib = state.weights.cost * c.costNorm;
+  const totalW = c.score || 1;
+
+  let html = `
+    <div class="detail-section">
+      <h3>${POWER_ICONS[b.powerType]} ${b.name}</h3>
+      <div class="detail-row"><span class="dl">ID</span><span class="dv">${b.id}</span></div>
+      <div class="detail-row"><span class="dl">Location</span><span class="dv">${b.lat.toFixed(2)}, ${b.lng.toFixed(2)} (${b.country})</span></div>
+      <div class="detail-row"><span class="dl">Power</span><span class="dv" style="color:${powerColor(b.powerType)}">${b.power}</span></div>
+      <div class="detail-row"><span class="dl">Base Carbon</span><span class="dv">${b.baseCar} gCO\u2082</span></div>
+      <div class="detail-row"><span class="dl">Zone</span><span class="dv">${b.zone}</span></div>
+      ${b.capacity_mw ? `<div class="detail-row"><span class="dl">Capacity</span><span class="dv">${b.capacity_mw} MW</span></div>` : ''}
+      <div class="detail-row"><span class="dl">GPUs</span><span class="dv">${b.gpus.length ? b.gpus.join(', ') : '\u2014'}</span></div>
+      <div class="detail-row"><span class="dl">Status</span><span class="dv" style="color:${STATUS_COLORS[b.status]}">${STATUS_LABELS[b.status]}</span></div>
+    </div>
+    <div class="detail-section">
+      <h3>Score Breakdown</h3>
+      <div class="detail-row"><span class="dl">Final Score</span><span class="dv accent">${c.score.toFixed(3)}</span></div>
+      <div class="breakdown-bar">
+        <div class="bb-carbon" style="width:${totalW > 0 ? carbonContrib/totalW*100 : 33}%"></div>
+        <div class="bb-latency" style="width:${totalW > 0 ? latencyContrib/totalW*100 : 33}%"></div>
+        <div class="bb-cost" style="width:${totalW > 0 ? costContrib/totalW*100 : 34}%"></div>
+      </div>
+      <div class="legend-row">
+        <div class="legend-item"><div class="legend-dot" style="background:#00e5a0"></div>Carbon</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#0ea5e9"></div>Latency</div>
+        <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div>Cost</div>
+      </div>
+      <div class="detail-row" style="margin-top:8px"><span class="dl">Carbon</span><span class="dv">${state.weights.carbon.toFixed(2)} \u00D7 (${c.carbon.toFixed(1)}/500) = ${carbonContrib.toFixed(4)}</span></div>
+      <div class="detail-row"><span class="dl">Latency</span><span class="dv">${state.weights.latency.toFixed(2)} \u00D7 (${c.latencyMs}/300) = ${latencyContrib.toFixed(4)}</span></div>
+      <div class="detail-row"><span class="dl">Cost</span><span class="dv">${state.weights.cost.toFixed(2)} \u00D7 (${c.loadPct.toFixed(0)}/100) = ${costContrib.toFixed(4)}</span></div>
+    </div>
+    <div class="detail-section">
+      <h3>Carbon Source</h3>
+      <div class="detail-row"><span class="dl">Active</span><span class="dv">${source}</span></div>
+      <div class="detail-row"><span class="dl">Current</span><span class="dv" style="color:${carbonColor(c.carbon)}">${c.carbon.toFixed(1)} gCO\u2082/kWh ${carbonGrade(c.carbon)}</span></div>
+      <div class="detail-row"><span class="dl">In GB?</span><span class="dv">${isGb(b.lat, b.lng) ? 'Yes' : 'No'}</span></div>
+    </div>
+    <div class="detail-section">
+      <h3>Latency Path</h3>
+      <div class="latency-path-box">`;
+
+  if (breakdown.type === 'short') {
+    html += `<div class="lat-seg"><span>Direct (${breakdown.directDist.toFixed(0)}km)</span><span class="ms">${breakdown.totalMs} ms</span></div>`;
+  } else {
+    html += `
+      <div class="lat-seg"><span>Origin \u2192 ${breakdown.srcHub}</span><span class="ms">${breakdown.srcLastMile.toFixed(1)}ms</span></div>
+      <div class="lat-seg"><span>${breakdown.srcHub} \u2192 ${breakdown.dstHub}</span><span class="ms">${breakdown.hubToHub.toFixed(1)}ms (${breakdown.hubMethod})</span></div>
+      <div class="lat-seg"><span>${breakdown.dstHub} \u2192 Backend</span><span class="ms">${breakdown.dstLastMile.toFixed(1)}ms</span></div>
+      <div class="lat-seg"><span>Peering overhead</span><span class="ms">${breakdown.peeringOverhead.toFixed(1)}ms</span></div>
+      <div class="lat-seg" style="border-top:1px solid #1e293b;margin-top:4px;padding-top:4px"><span><strong>Total</strong></span><span class="ms"><strong>${breakdown.totalMs} ms</strong></span></div>`;
+  }
+
+  html += `</div></div>
+    <div class="detail-section">
+      <h3>Response Headers</h3>
+      <div class="headers-block"><span class="hdr-name">X-Carbon-Router-Backend:</span> <span class="hdr-val">${c.id}</span>
+<span class="hdr-name">X-Carbon-Router-Score:</span> <span class="hdr-val">${c.score.toFixed(3)}</span>
+<span class="hdr-name">X-Carbon-Router-Carbon:</span> <span class="hdr-val">${c.carbon.toFixed(1)}</span>
+<span class="hdr-name">X-Carbon-Router-Latency:</span> <span class="hdr-val">${c.latencyMs}</span>
+<span class="hdr-name">X-Carbon-Router-Load:</span> <span class="hdr-val">${c.loadPct.toFixed(0)}</span>
+<span class="hdr-name">X-Carbon-Router-Source:</span> <span class="hdr-val">${source}</span></div>
+    </div>`;
+
+  container.innerHTML = html;
+}
+
+// ── Render: Route History ───────────────────────────────────
+
+function renderHistory() {
+  const panel = document.getElementById('history-panel');
+  const content = document.getElementById('history-content');
+  if (state.routeHistory.length === 0) { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+  content.innerHTML = state.routeHistory.map((h, i) => `
+    <div class="history-row" style="opacity:${1 - i * 0.04}">
+      <span class="h-time">${h.time}</span>
+      <span class="h-origin">${h.origin}</span>
+      <span class="h-dest">\u2192 ${h.region}</span>
+      <span style="color:${carbonColor(h.carbon)}">${h.carbon} gCO\u2082</span>
+      <span class="h-latency">${h.latency}ms</span>
+      <span class="h-score">score: ${h.score}</span>
+    </div>
+  `).join('');
+}
+
+// ── Render: 24h Carbon Chart ────────────────────────────────
+
+function drawCarbonChart() {
+  const canvas = document.getElementById('carbon-chart');
+  const rect = canvas.parentElement.getBoundingClientRect();
+  canvas.width = rect.width - 40;
+  canvas.height = 190;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const pad = { top: 10, bottom: 28, left: 48, right: 16 };
+  const plotW = W - pad.left - pad.right, plotH = H - pad.top - pad.bottom;
+
+  ctx.clearRect(0, 0, W, H);
+
+  let maxC = 100;
+  BACKENDS.forEach(b => {
+    for (let h = 0; h < 24; h++) {
+      const c = simulateCarbon(b.baseCar, b.powerType, h);
+      if (c > maxC) maxC = c;
+    }
+  });
+  maxC = Math.ceil(maxC / 50) * 50;
+
+  // Grid
+  ctx.strokeStyle = '#1a2438'; ctx.lineWidth = 0.5;
+  ctx.font = '9px monospace'; ctx.fillStyle = '#475569';
+  for (let v = 0; v <= maxC; v += 100) {
+    const y = pad.top + plotH - (v / maxC) * plotH;
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(W - pad.right, y); ctx.stroke();
+    ctx.fillText(v, 4, y + 3);
+  }
+  for (let h = 0; h <= 24; h += 3) {
+    const x = pad.left + (h / 24) * plotW;
+    ctx.beginPath(); ctx.moveTo(x, pad.top); ctx.lineTo(x, H - pad.bottom); ctx.stroke();
+    ctx.fillText(`${h}:00`, x - 10, H - 10);
+  }
+
+  // Curves
+  BACKENDS.forEach(b => {
+    ctx.strokeStyle = powerColor(b.powerType);
+    ctx.lineWidth = (b.powerType === 'renewable' || b.powerType === 'ccs') ? 1 : 1.5;
+    ctx.globalAlpha = 0.7;
+    ctx.setLineDash((b.powerType === 'renewable' || b.powerType === 'ccs') ? [4, 4] : []);
+    ctx.beginPath();
+    for (let h = 0; h <= 24; h += 0.5) {
+      const c = simulateCarbon(b.baseCar, b.powerType, h);
+      const x = pad.left + (h / 24) * plotW;
+      const y = pad.top + plotH - (c / maxC) * plotH;
+      h === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]); ctx.globalAlpha = 1;
+  });
+
+  // Hour marker
+  const curHour = state.hour + (state.liveTime ? new Date().getUTCMinutes() / 60 : 0);
+  const hx = pad.left + (curHour / 24) * plotW;
+  ctx.strokeStyle = '#0ea5e9'; ctx.lineWidth = 1.5;
+  ctx.setLineDash([3, 3]);
+  ctx.beginPath(); ctx.moveTo(hx, pad.top); ctx.lineTo(hx, H - pad.bottom); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#0ea5e9'; ctx.font = '10px monospace';
+  ctx.fillText(`${Math.floor(curHour)}:${String(Math.floor((curHour % 1) * 60)).padStart(2, '0')} UTC`, hx + 4, pad.top + 12);
+
+  // Legend
+  let lx = pad.left + 4, ly = pad.top + 8;
+  ctx.font = '9px monospace';
+  const drawn = new Set();
+  BACKENDS.forEach(b => {
+    const key = `${b.powerType}-${b.baseCar}`;
+    if (drawn.has(key)) return;
+    drawn.add(key);
+    ctx.fillStyle = powerColor(b.powerType);
+    ctx.globalAlpha = 0.8;
+    ctx.fillRect(lx, ly - 4, 14, 2);
+    ctx.fillText(`${b.name.slice(0, 12)} (${b.baseCar})`, lx + 18, ly);
+    ly += 11; ctx.globalAlpha = 1;
+  });
+}
+
+// ── Main Update ─────────────────────────────────────────────
+
+function update() {
+  const snapshots = getSnapshots();
+  const { candidates, bestId } = selectBackend(snapshots, state.weights);
+
+  // Header
+  document.getElementById('header-origin').textContent = `${state.origin.flag} ${state.origin.name}`;
+  document.getElementById('origin-coords').textContent = `${state.origin.flag} ${state.origin.name} (${state.origin.lat.toFixed(1)}\u00B0, ${state.origin.lng.toFixed(1)}\u00B0)`;
+
+  renderMap();
+  renderTernary();
+  renderWeightBars();
+  renderBestBanner(bestId);
+  renderCards(bestId);
+  renderTable(candidates, bestId);
+  renderDetail(candidates, bestId);
+  renderHistory();
+  drawCarbonChart();
+}
+
+// ── Setup ───────────────────────────────────────────────────
+
+function setup() {
+  // Origin presets
+  const presetsEl = document.getElementById('origin-presets');
+  ORIGIN_PRESETS.forEach(p => {
+    const btn = document.createElement('button');
+    btn.className = 'origin-btn' + (state.origin.name === p.name ? ' active' : '');
+    btn.textContent = `${p.flag} ${p.name}`;
+    btn.addEventListener('click', () => {
+      state.origin = p;
+      refreshRegionData();
+      presetsEl.querySelectorAll('.origin-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      update();
+    });
+    presetsEl.appendChild(btn);
+  });
+
+  // Map click-to-set-origin
+  const mapSvg = document.getElementById('map-svg');
+  mapSvg.addEventListener('mousedown', e => { mapDragging = true; mapSetOrigin(e); });
+  window.addEventListener('mousemove', e => { if (mapDragging) { e.preventDefault(); mapSetOrigin(e); } });
+  window.addEventListener('mouseup', () => { mapDragging = false; });
+  mapSvg.addEventListener('touchstart', e => { mapDragging = true; mapSetOrigin(e); }, { passive: true });
+  window.addEventListener('touchmove', e => { if (mapDragging) { e.preventDefault(); mapSetOrigin(e); } }, { passive: false });
+  window.addEventListener('touchend', () => { mapDragging = false; });
+
+  // Ternary triangle click/drag
+  let ternDragging = false;
+  const ternSvg = document.getElementById('ternary-svg');
+  function ternClick(e) {
+    const rect = ternSvg.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    const px = (clientX - rect.left) * (TRI_SVG_W / rect.width);
+    const py = (clientY - rect.top) * (TRI_SVG_H / rect.height);
+    state.weights = toBarycentric(px, py);
+    update();
+  }
+  ternSvg.addEventListener('mousedown', e => { ternDragging = true; ternClick(e); });
+  window.addEventListener('mousemove', e => { if (ternDragging) { e.preventDefault(); ternClick(e); } });
+  window.addEventListener('mouseup', () => { ternDragging = false; });
+  ternSvg.addEventListener('touchstart', e => { ternDragging = true; ternClick(e); }, { passive: true });
+  window.addEventListener('touchmove', e => { if (ternDragging) { e.preventDefault(); ternClick(e); } }, { passive: false });
+  window.addEventListener('touchend', () => { ternDragging = false; });
+
+  // Weight presets
+  const presetBtns = document.getElementById('preset-btns');
+  [
+    { label: 'Green First', w: { carbon: 0.85, latency: 0.1, cost: 0.05 } },
+    { label: 'Balanced', w: { carbon: 0.34, latency: 0.33, cost: 0.33 } },
+    { label: 'Low Latency', w: { carbon: 0.1, latency: 0.8, cost: 0.1 } },
+    { label: 'Budget', w: { carbon: 0.1, latency: 0.1, cost: 0.8 } },
+  ].forEach(p => {
+    const btn = document.createElement('button');
+    btn.className = 'preset-btn';
+    btn.textContent = p.label;
+    btn.addEventListener('click', () => { state.weights = { ...p.w }; update(); });
+    presetBtns.appendChild(btn);
+  });
+
+  // Simulate Request button
+  document.getElementById('sim-btn').addEventListener('click', () => {
+    refreshRegionData();
+    const snapshots = getSnapshots();
+    const { candidates, bestId } = selectBackend(snapshots, state.weights);
+    const best = candidates.find(c => c.id === bestId);
+    if (best) {
+      state.routeHistory = [{
+        time: new Date().toLocaleTimeString(),
+        region: best.name,
+        carbon: best.carbon.toFixed(0),
+        latency: best.latencyMs,
+        score: best.score,
+        origin: state.origin.name,
+      }, ...state.routeHistory].slice(0, 20);
+    }
+    update();
+  });
+
+  // Hour slider
+  const hourSlider = document.getElementById('hour-slider');
+  const hourVal = document.getElementById('hour-val');
+  const liveToggle = document.getElementById('live-toggle');
+  hourSlider.addEventListener('input', () => {
+    state.hour = parseInt(hourSlider.value);
+    hourVal.textContent = `${String(state.hour).padStart(2, '0')}:00`;
+    state.liveTime = false; liveToggle.checked = false;
+    refreshRegionData(); update();
+  });
+  liveToggle.addEventListener('change', () => {
+    state.liveTime = liveToggle.checked;
+    if (state.liveTime) {
+      state.hour = new Date().getUTCHours();
+      hourSlider.value = state.hour;
+      hourVal.textContent = `${String(state.hour).padStart(2, '0')}:00`;
+    }
+    refreshRegionData(); update();
+  });
+
+  // Carbon source
+  document.getElementById('carbon-source').addEventListener('change', e => {
+    state.carbonSource = e.target.value;
+    update();
+  });
+
+  // Auto-refresh toggle
+  document.getElementById('auto-refresh').addEventListener('change', e => {
+    state.autoRefresh = e.target.checked;
+    refreshRegionData(); update();
+  });
+
+  // Style range inputs
+  document.querySelectorAll('input[type="range"]').forEach(el => {
+    el.style.cssText = '-webkit-appearance:none;height:4px;background:#1a2438;border-radius:2px;outline:none';
+  });
+
+  // Clock
+  function updateClock() {
+    const now = new Date();
+    document.getElementById('utc-clock').textContent = now.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+    if (state.liveTime) {
+      const h = now.getUTCHours();
+      if (h !== state.hour) {
+        state.hour = h;
+        hourSlider.value = h;
+        hourVal.textContent = `${String(h).padStart(2, '0')}:00`;
+      }
+    }
+  }
+  setInterval(updateClock, 1000);
+  updateClock();
+
+  // Auto-refresh every 5s
+  setInterval(() => {
+    if (state.autoRefresh) {
+      refreshRegionData();
+      update();
+    }
+  }, 5000);
+
+  // Resize handler
+  window.addEventListener('resize', () => drawCarbonChart());
+
+  // Initial
+  refreshRegionData();
+  update();
+}
+
+setup();
+</script>
+</body>
+</html>

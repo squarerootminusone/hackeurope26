@@ -1,0 +1,143 @@
+[server]
+bind = "0.0.0.0:8080"
+timeout_secs = 300
+max_body_bytes = 10485760  # 10 MB
+
+[weights]
+carbon = 0.7
+latency = 0.2
+cost = 0.1
+
+[carbon]
+poll_interval_secs = 300
+use_simulated_fallback = true
+
+# ElectricityMaps — free tier: 50 req/hr, global coverage
+# Get a key at https://www.electricitymaps.com/free-tier-api
+[carbon.electricity_maps]
+api_key = ""
+base_url = "https://api.electricitymap.org/v3"
+
+# WattTime — free tier: marginal emissions percentile, global coverage
+# Register at https://watttime.org/api-documentation/
+[carbon.watttime]
+username = ""
+password = ""
+base_url = "https://api.watttime.org/v3"
+
+# UK Carbon Intensity — free, unlimited, no auth, GB only
+# https://carbonintensity.org.uk/
+[carbon.uk_carbon_intensity]
+enabled = true
+base_url = "https://api.carbonintensity.org.uk"
+
+[health]
+interval_secs = 30
+timeout_secs = 5
+unhealthy_threshold = 3
+
+[latency]
+probe_interval_secs = 60
+probe_path = "/health"
+
+# === Crusoe Cloud Backends ===
+
+[[backend]]
+id = "eu-iceland1-a"
+name = "ICE02 Keflavík"
+url = "http://eu-iceland1-a.inference.example.com"
+lat = 64.0
+lng = -22.5
+power_type = "renewable"
+base_carbon = 12.0
+electricity_maps_zone = "IS"
+gpus = ["GB200 NVL72", "A100", "H100"]
+
+[[backend]]
+id = "eu-norway1-a"
+name = "Polar DRA01"
+url = "http://eu-norway1-a.inference.example.com"
+lat = 59.5
+lng = 10.5
+power_type = "renewable"
+base_carbon = 18.0
+electricity_maps_zone = "NO-NO1"
+gpus = []
+carbon_source = "auto"  # demo: auto-detects best source
+
+[[backend]]
+id = "us-east1-a"
+name = "Equinix Culpeper"
+url = "http://us-east1-a.inference.example.com"
+lat = 38.47
+lng = -78.0
+power_type = "grid"
+base_carbon = 340.0
+electricity_maps_zone = "US-MIDA-PJM"
+gpus = []
+
+[[backend]]
+id = "us-southcentral1-a"
+name = "Digital Realty TX"
+url = "http://us-southcentral1-a.inference.example.com"
+lat = 32.78
+lng = -96.8
+power_type = "grid"
+base_carbon = 380.0
+electricity_maps_zone = "US-TEX-ERCO"
+gpus = []
+
+[[backend]]
+id = "us-northcentral1-a"
+name = "US North Central"
+url = "http://us-northcentral1-a.inference.example.com"
+lat = 46.8
+lng = -110.3
+power_type = "grid"
+base_carbon = 290.0
+electricity_maps_zone = "US-NW-NWMT"
+gpus = []
+
+[[backend]]
+id = "us-tx-abilene"
+name = "Abilene Lancium (Stargate)"
+url = "http://us-tx-abilene.inference.example.com"
+lat = 32.35
+lng = -99.8
+power_type = "hybrid"
+base_carbon = 180.0
+electricity_maps_zone = "US-TEX-ERCO"
+gpus = ["GB200 NVL72"]
+
+[[backend]]
+id = "us-nv-sparks"
+name = "Redwood Spark"
+url = "http://us-nv-sparks.inference.example.com"
+lat = 39.53
+lng = -119.75
+power_type = "renewable"
+base_carbon = 0.0
+electricity_maps_zone = "US-NW-PACW"
+gpus = ["A100", "B200"]
+
+[[backend]]
+id = "us-wy-cheyenne"
+name = "Project Jade (Cheyenne)"
+url = "http://us-wy-cheyenne.inference.example.com"
+lat = 41.1
+lng = -104.8
+power_type = "ccs"
+base_carbon = 45.0
+electricity_maps_zone = "US-NW-WACM"
+gpus = []
+
+[[backend]]
+id = "ca-ab-calgary"
+name = "Myers Energy Park"
+url = "http://ca-ab-calgary.inference.example.com"
+lat = 51.05
+lng = -114.07
+power_type = "ccs"
+base_carbon = 50.0
+electricity_maps_zone = "CA-AB"
+gpus = []

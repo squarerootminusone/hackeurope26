@@ -1,0 +1,14 @@
+C:\Users\fourk\Downloads\hack26\carbon-router\target\release\deps\serde-eccb853b11dcc0e4.d: C:\Users\fourk\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs C:\Users\fourk\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs C:\Users\fourk\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs C:\Users\fourk\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs C:\Users\fourk\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs C:\Users\fourk\Downloads\hack26\carbon-router\target\release\build\serde-987afe65b1bdc65c\out/private.rs
+
+C:\Users\fourk\Downloads\hack26\carbon-router\target\release\deps\libserde-eccb853b11dcc0e4.rlib: C:\Users\fourk\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs C:\Users\fourk\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs C:\Users\fourk\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs C:\Users\fourk\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs C:\Users\fourk\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs C:\Users\fourk\Downloads\hack26\carbon-router\target\release\build\serde-987afe65b1bdc65c\out/private.rs
+
+C:\Users\fourk\Downloads\hack26\carbon-router\target\release\deps\libserde-eccb853b11dcc0e4.rmeta: C:\Users\fourk\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs C:\Users\fourk\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs C:\Users\fourk\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs C:\Users\fourk\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs C:\Users\fourk\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs C:\Users\fourk\Downloads\hack26\carbon-router\target\release\build\serde-987afe65b1bdc65c\out/private.rs
+
+C:\Users\fourk\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\lib.rs:
+C:\Users\fourk\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\integer128.rs:
+C:\Users\fourk\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\mod.rs:
+C:\Users\fourk\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\de.rs:
+C:\Users\fourk\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\serde-1.0.228\src\private\ser.rs:
+C:\Users\fourk\Downloads\hack26\carbon-router\target\release\build\serde-987afe65b1bdc65c\out/private.rs:
+
+# env-dep:OUT_DIR=C:\\Users\\fourk\\Downloads\\hack26\\carbon-router\\target\\release\\build\\serde-987afe65b1bdc65c\\out
