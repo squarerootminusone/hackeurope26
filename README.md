@@ -3,6 +3,7 @@
 - Orchestration VM with the dashboard `build-vm`
 - Artifact Registry repository `bench-test-images`
 - GCS bucket `bench-test-dependencies`
+- Carbon-aware request router (`./carbon-router/`, prod-ready)
 
 # Workflow
 
