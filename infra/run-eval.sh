@@ -7,6 +7,8 @@ set -euo pipefail
 # Usage:
 #   bash infra/run-eval.sh \
 #     --name "hamer-baseline-l4" \
+#     --model "hamer" \
+#     --optimized \
 #     --image "europe-west1-docker.pkg.dev/PROJECT/hamer/hamer-baseline:latest" \
 #     --machine-type g2-standard-8 \
 #     --accelerator "type=nvidia-l4,count=1"
@@ -15,6 +17,8 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 
 EVAL_NAME=""
+MODEL_NAME=""
+IS_OPTIMIZED=0
 DOCKER_IMAGE=""
 MACHINE_TYPE="g2-standard-8"
 ACCELERATOR=""
@@ -25,6 +29,8 @@ PROJECT=$(gcloud config get-value project)
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -n|--name)         EVAL_NAME="$2";    shift 2 ;;
+    --model)           MODEL_NAME="$2";   shift 2 ;;
+    --optimized)       IS_OPTIMIZED=1;    shift ;;
     -i|--image)        DOCKER_IMAGE="$2"; shift 2 ;;
     -m|--machine-type) MACHINE_TYPE="$2"; shift 2 ;;
     -a|--accelerator)  ACCELERATOR="$2";  shift 2 ;;
@@ -33,6 +39,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -z "$EVAL_NAME" ]]    && { echo "Error: --name is required"; exit 1; }
+[[ -z "$MODEL_NAME" ]]   && { echo "Error: --model is required"; exit 1; }
 [[ -z "$DOCKER_IMAGE" ]] && { echo "Error: --image is required"; exit 1; }
 
 : "${DB_HOST:?DB_HOST env var required}"
@@ -45,11 +52,13 @@ done
 VM_NAME="eval-$(echo "$EVAL_NAME" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-' | sed 's/^-//;s/-$//' | head -c 50)"
 
 echo "=== Starting Evaluation ==="
-echo "Name:     $EVAL_NAME"
-echo "Image:    $DOCKER_IMAGE"
-echo "Machine:  $MACHINE_TYPE"
-echo "Accel:    ${ACCELERATOR:-none}"
-echo "VM:       $VM_NAME"
+echo "Name:      $EVAL_NAME"
+echo "Model:     $MODEL_NAME"
+echo "Optimized: $( [[ $IS_OPTIMIZED -eq 1 ]] && echo yes || echo no )"
+echo "Image:     $DOCKER_IMAGE"
+echo "Machine:   $MACHINE_TYPE"
+echo "Accel:     ${ACCELERATOR:-none}"
+echo "VM:        $VM_NAME"
 echo ""
 
 # --- Build accelerator flags ---
@@ -156,7 +165,7 @@ gcloud sql instances patch "$SQL_INSTANCE" \
 # --- Step 3: Insert evaluation row ---
 echo "==> Inserting evaluation row..."
 EVAL_ID=$(mysql -h "$DB_HOST" -u "$DB_USER" -p"$DB_PASS" "$DB_NAME" -N -B \
-  -e "INSERT INTO evaluations (evaluation_name, vm_reference) VALUES ('$EVAL_NAME', '$VM_NAME'); SELECT LAST_INSERT_ID();")
+  -e "INSERT INTO evaluations (evaluation_name, model_name, is_optimized, vm_reference, instance_type) VALUES ('$EVAL_NAME', '$MODEL_NAME', $IS_OPTIMIZED, '$VM_NAME', '$MACHINE_TYPE'); SELECT LAST_INSERT_ID();")
 
 echo "Evaluation ID: $EVAL_ID"
 
