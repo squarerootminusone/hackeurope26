@@ -9,7 +9,7 @@ set -euo pipefail
 #     --name "hamer-baseline-l4" \
 #     --model "hamer" \
 #     --optimized \
-#     --image "europe-west1-docker.pkg.dev/PROJECT/hamer/hamer-baseline:latest" \
+#     --image "europe-west1-docker.pkg.dev/PROJECT/bench-test-images/hamer-baseline:latest" \
 #     --machine-type g2-standard-8 \
 #     --accelerator "type=nvidia-l4,count=1"
 #
@@ -61,10 +61,10 @@ echo "Accel:     ${ACCELERATOR:-none}"
 echo "VM:        $VM_NAME"
 echo ""
 
-# --- Build accelerator flags ---
-ACCEL_FLAGS=""
+# --- Build accelerator / GPU flags ---
+GPU_FLAGS="--maintenance-policy=TERMINATE"
 if [[ -n "$ACCELERATOR" ]]; then
-  ACCEL_FLAGS="--accelerator=$ACCELERATOR --maintenance-policy=TERMINATE"
+  GPU_FLAGS="$GPU_FLAGS --accelerator=$ACCELERATOR"
 fi
 
 # --- Startup script (runs on the VM) ---
@@ -98,8 +98,28 @@ if [[ -z "$EVAL_ID" ]]; then
   exit 1
 fi
 
-# Install mysql client
-apt-get update -qq && apt-get install -y -qq default-mysql-client
+# Install Docker + NVIDIA Container Toolkit + mysql client
+apt-get update -qq
+apt-get install -y -qq default-mysql-client ca-certificates curl gnupg
+
+# Docker
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+chmod a+r /etc/apt/keyrings/docker.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
+apt-get update -qq
+apt-get install -y -qq docker-ce docker-ce-cli containerd.io
+
+# NVIDIA Container Toolkit
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+  | gpg --batch --yes --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+  | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+  > /etc/apt/sources.list.d/nvidia-container-toolkit.list
+apt-get update -qq
+apt-get install -y -qq nvidia-container-toolkit
+nvidia-ctk runtime configure --runtime=docker
+systemctl restart docker
 
 # Configure docker for Artifact Registry
 gcloud auth configure-docker europe-west1-docker.pkg.dev --quiet 2>/dev/null || true
@@ -127,10 +147,13 @@ echo "==> Creating VM $VM_NAME..."
 gcloud compute instances create "$VM_NAME" \
   --zone="$ZONE" \
   --machine-type="$MACHINE_TYPE" \
-  $ACCEL_FLAGS \
-  --image-family=pytorch-latest-gpu \
+  $GPU_FLAGS \
+  --network=bench-test \
+  --subnet=bench-test-subnet \
+  --image-family=pytorch-2-7-cu128-ubuntu-2204-nvidia-570 \
   --image-project=deeplearning-platform-release \
   --boot-disk-size=200GB \
+  --tags=worker \
   --scopes=cloud-platform \
   --metadata=db-host="$DB_HOST",db-user="$DB_USER",db-pass="$DB_PASS",db-name="$DB_NAME",docker-image="$DOCKER_IMAGE" \
   --metadata-from-file=startup-script=<(echo "$STARTUP_SCRIPT") \
@@ -149,7 +172,7 @@ echo "==> Authorizing VM IP $VM_IP on Cloud SQL..."
 EXISTING=$(gcloud sql instances describe "$SQL_INSTANCE" \
   --project="$PROJECT" \
   --format="value(settings.ipConfiguration.authorizedNetworks[].value)" \
-  | tr '\n' ',' | sed 's/,$//')
+  | tr ';\n' ',' | sed 's/,$//')
 
 if [[ -n "$EXISTING" ]]; then
   ALL_NETWORKS="${EXISTING},${VM_IP}/32"

@@ -4,8 +4,8 @@ set -e
 VM=build-vm
 ZONE=europe-west1-b
 PROJECT=$(gcloud config get-value project)
-BASELINE=europe-west1-docker.pkg.dev/$PROJECT/hamer/hamer-baseline:latest
-OPTIMIZED=europe-west1-docker.pkg.dev/$PROJECT/hamer/hamer-optimized:latest
+BASELINE=europe-west1-docker.pkg.dev/$PROJECT/bench-test-images/hamer-baseline:latest
+OPTIMIZED=europe-west1-docker.pkg.dev/$PROJECT/bench-test-images/hamer-optimized:latest
 
 echo "Project: $PROJECT"
 echo "Building baseline: $BASELINE"
@@ -33,7 +33,7 @@ gcloud compute ssh $VM --zone=$ZONE --command="
 # Push both to Artifact Registry
 echo "==> Pushing images to Artifact Registry..."
 gcloud compute ssh $VM --zone=$ZONE --command="
-  gcloud auth configure-docker europe-west1-docker.pkg.dev --quiet
+  sudo bash -c 'gcloud auth configure-docker europe-west1-docker.pkg.dev --quiet'
   sudo docker push $BASELINE
   sudo docker push $OPTIMIZED
 "

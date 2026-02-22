@@ -5,7 +5,7 @@ set -euo pipefail
 # setup-db.sh — One-time Cloud SQL MySQL instance + evaluations table setup
 # ---------------------------------------------------------------------------
 
-INSTANCE_NAME="hackeurope-eval-db"
+INSTANCE_NAME="bench-test-eval-db"
 REGION="europe-west1"
 TIER="db-f1-micro"
 DB_NAME="evaluations_db"

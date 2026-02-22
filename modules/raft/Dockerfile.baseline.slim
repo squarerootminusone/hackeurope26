@@ -1,0 +1,46 @@
+FROM nvidia/cuda:11.8.0-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# System deps (includes fuse + gcsfuse prerequisites)
+RUN apt-get update && apt-get install -y \
+    python3.10 python3.10-venv python3.10-dev python3-pip \
+    git wget unzip curl \
+    libgl1-mesa-glx libglib2.0-0 \
+    fuse lsb-release gnupg2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install gcsfuse
+RUN export GCSFUSE_REPO="gcsfuse-jammy" && \
+    echo "deb https://packages.cloud.google.com/apt $GCSFUSE_REPO main" \
+      > /etc/apt/sources.list.d/gcsfuse.list && \
+    curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
+      | apt-key add - && \
+    apt-get update && \
+    apt-get install -y gcsfuse && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1 && \
+    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1
+
+RUN pip install --upgrade pip setuptools wheel
+
+# Clone RAFT
+RUN git clone https://github.com/princeton-vl/RAFT.git /app/raft
+WORKDIR /app/raft
+
+# Install PyTorch (CUDA 11.8)
+RUN pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+
+# Install remaining deps
+RUN pip install scipy opencv-python-headless Pillow matplotlib tensorboard
+
+# Copy baseline benchmark script
+COPY eval_bench.py /app/raft/eval_bench.py
+
+# Entrypoint script (mounts GCS and creates symlinks)
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+ENTRYPOINT ["/app/entrypoint.sh", "python"]
+CMD ["eval_bench.py", "--model", "models/raft-sintel.pth", "--dataset", "sintel"]

@@ -1,0 +1,12 @@
+{
+  "name": "bench-test-infra",
+  "main": "index.ts",
+  "devDependencies": {
+    "@types/node": "^20",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@pulumi/pulumi": "^3",
+    "@pulumi/gcp": "^8"
+  }
+}

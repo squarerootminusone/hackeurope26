@@ -16,3 +16,7 @@ __pycache__/
 .DS_Store
 **/__pycache__/
 output/
+node_modules/
+**/node_modules/
+*/node_modules/
+**/*/node_modules/

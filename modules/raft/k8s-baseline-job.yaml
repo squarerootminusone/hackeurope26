@@ -1,0 +1,62 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: raft-baseline-l4
+  namespace: default
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      annotations:
+        gke-gcsfuse/volumes: "true"
+    spec:
+      serviceAccountName: raft-bench
+      nodeSelector:
+        cloud.google.com/gke-accelerator: nvidia-l4
+      restartPolicy: Never
+      containers:
+      - name: raft
+        image: europe-west1-docker.pkg.dev/data-platform-dev-486916/bench-test-images/raft-baseline-slim:latest
+        command: ["/bin/bash", "-c"]
+        args:
+        - |
+          set -ex
+
+          echo "==> Checking GCS mount..."
+          ls -la /mnt/gcs/ || { echo "ERROR: GCS mount empty"; exit 1; }
+          ls /mnt/gcs/models/ || { echo "ERROR: models dir missing"; exit 1; }
+
+          # Create symlinks from CSI-mounted GCS volume
+          ln -sf /mnt/gcs/models /app/raft/models
+          mkdir -p /app/raft/datasets
+          ln -sf /mnt/gcs/datasets/Sintel /app/raft/datasets/Sintel
+
+          # Verify
+          echo "==> Verifying data..."
+          ls -la /app/raft/models/raft-sintel.pth
+          ls /app/raft/datasets/Sintel/training/clean/ | head -5
+          ls /app/raft/datasets/Sintel/training/flow/ | head -5
+
+          # Run baseline benchmark
+          cd /app/raft
+          python eval_bench.py --model models/raft-sintel.pth --dataset sintel
+
+          # Persist results to GCS
+          cp results/baseline_results.json /mnt/gcs/results/baseline_l4.json
+          echo "==> Results saved to GCS"
+        resources:
+          limits:
+            nvidia.com/gpu: "1"
+          requests:
+            cpu: "4"
+            memory: "16Gi"
+        volumeMounts:
+        - name: gcs-data
+          mountPath: /mnt/gcs
+      volumes:
+      - name: gcs-data
+        csi:
+          driver: gcsfuse.csi.storage.gke.io
+          volumeAttributes:
+            bucketName: bench-test-dependencies-data-platform-dev-486916
+            mountOptions: "only-dir=raft,implicit-dirs"

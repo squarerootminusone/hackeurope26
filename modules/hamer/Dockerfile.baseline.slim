@@ -3,14 +3,27 @@ FROM nvidia/cuda:11.8.0-devel-ubuntu22.04
 ENV DEBIAN_FRONTEND=noninteractive
 ENV FORCE_CUDA=1
 ENV TORCH_CUDA_ARCH_LIST="8.0;8.9"
+ENV PYOPENGL_PLATFORM=osmesa
+ENV NVIDIA_DRIVER_CAPABILITIES=all
 
-# System deps
+# System deps (includes fuse + gcsfuse prerequisites)
 RUN apt-get update && apt-get install -y \
     python3.10 python3.10-venv python3.10-dev python3-pip \
     git wget unzip curl \
     libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev \
-    libegl1-mesa-dev libgles2-mesa-dev libosmesa6 \
+    libegl1-mesa-dev libgles2-mesa-dev \
+    fuse lsb-release gnupg2 libosmesa6 \
     && rm -rf /var/lib/apt/lists/*
+
+# Install gcsfuse
+RUN export GCSFUSE_REPO="gcsfuse-jammy" && \
+    echo "deb https://packages.cloud.google.com/apt $GCSFUSE_REPO main" \
+      > /etc/apt/sources.list.d/gcsfuse.list && \
+    curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
+      | apt-key add - && \
+    apt-get update && \
+    apt-get install -y gcsfuse && \
+    rm -rf /var/lib/apt/lists/*
 
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1 && \
     update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1
@@ -30,34 +43,6 @@ RUN pip install 'git+https://github.com/facebookresearch/detectron2' --no-build-
 # Install hamer + ViTPose
 RUN pip install -e ".[all]" --no-build-isolation && pip install -v -e third-party/ViTPose --no-build-isolation
 
-# Download model checkpoints
-RUN bash fetch_demo_data.sh
-
-# Download MANO_RIGHT.pkl
-# NOTE: MANO model requires manual download from https://mano.is.tue.mpg.de
-# Place MANO_RIGHT.pkl at _DATA/data/mano/MANO_RIGHT.pkl before building,
-# or mount it at runtime.
-RUN mkdir -p _DATA/data/mano
-# COPY MANO_RIGHT.pkl _DATA/data/mano/MANO_RIGHT.pkl
-
-# Download FreiHAND eval dataset (retry with user-agent, fall back gracefully)
-RUN mkdir -p /datasets/FreiHAND && \
-    wget --tries=3 --timeout=60 --user-agent="Mozilla/5.0" \
-      "https://lmb.informatik.uni-freiburg.de/data/freihand/FreiHAND_pub_v2_eval.zip" \
-      -O /tmp/freihand_eval.zip && \
-    unzip -q /tmp/freihand_eval.zip -d /datasets/FreiHAND && \
-    rm /tmp/freihand_eval.zip \
-    || echo "WARNING: FreiHAND download failed. Mount dataset at /datasets/FreiHAND at runtime."
-
-# Download hamer evaluation metadata
-RUN wget --tries=3 --timeout=60 \
-      "https://www.cs.utexas.edu/~pavlakos/hamer/data/hamer_evaluation_data.tar.gz" \
-      -O /tmp/hamer_evaluation_data.tar.gz && \
-    tar --warning=no-unknown-keyword --exclude=".*" \
-      -xzf /tmp/hamer_evaluation_data.tar.gz -C /app/hamer && \
-    rm /tmp/hamer_evaluation_data.tar.gz \
-    || echo "WARNING: hamer eval metadata download failed. Mount at runtime."
-
 # Update eval config paths to match container layout
 RUN sed -i 's|/home/user/datasets/FreiHAND_pub_v2_eval/evaluation/rgb/|/datasets/FreiHAND/evaluation/rgb/|g' \
     hamer/configs/datasets_eval.yaml
@@ -66,5 +51,9 @@ RUN sed -i 's|/home/user/datasets/FreiHAND_pub_v2_eval/evaluation/rgb/|/datasets
 RUN sed -i 's|model = HAMER.load_from_checkpoint(checkpoint_path, strict=False, cfg=model_cfg)|model = HAMER.load_from_checkpoint(checkpoint_path, strict=False, cfg=model_cfg, init_renderer=False)|g' \
     hamer/models/__init__.py
 
-ENTRYPOINT ["python"]
+# Entrypoint script (mounts GCS and creates symlinks)
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+ENTRYPOINT ["/app/entrypoint.sh", "python"]
 CMD ["eval.py", "--dataset", "FREIHAND-VAL"]

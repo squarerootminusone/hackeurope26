@@ -23,11 +23,19 @@ optimization:
   max_retries: 3
 
 cloud:
-  provider: "runpod"
-  gpu_types: ["NVIDIA A100 80GB", "NVIDIA L40S", "NVIDIA RTX 4090"]
-  region: "US"
-  container_registry: "dockerhub"
-  registry_prefix: "username"
+  provider: "gcp"
+  project: "data-platform-dev-486916"
+  region: "europe-west1"
+  zone: "europe-west1-b"
+  network: "bench-test"
+  subnet: "bench-test-subnet"
+  gpu_types: ["NVIDIA L4"]
+  container_registry: "europe-west1-docker.pkg.dev/data-platform-dev-486916/bench-test-images"
+  sql_instance: "bench-test-eval-db"
+  sql_connection_name: "data-platform-dev-486916:europe-west1:bench-test-eval-db"
+  sql_host: "35.205.179.231"
+  gke_cluster: "bench-test-cluster"
+  gcs_bucket: "bench-test-dependencies-data-platform-dev-486916"
 
 benchmark:
   runs_per_config: 3

@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y \
     python3.10 python3.10-venv python3.10-dev python3-pip \
     git wget unzip curl \
     libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev \
-    libegl1-mesa-dev libgles2-mesa-dev \
+    libegl1-mesa-dev libgles2-mesa-dev libosmesa6 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.10 1 && \
@@ -61,6 +61,10 @@ RUN wget --tries=3 --timeout=60 \
 # Update eval config paths to match container layout
 RUN sed -i 's|/home/user/datasets/FreiHAND_pub_v2_eval/evaluation/rgb/|/datasets/FreiHAND/evaluation/rgb/|g' \
     hamer/configs/datasets_eval.yaml
+
+# Skip renderer init during eval (avoids EGL/OSMesa dependency on headless servers)
+RUN sed -i 's|model = HAMER.load_from_checkpoint(checkpoint_path, strict=False, cfg=model_cfg)|model = HAMER.load_from_checkpoint(checkpoint_path, strict=False, cfg=model_cfg, init_renderer=False)|g' \
+    hamer/models/__init__.py
 
 # Copy optimized modules over the originals
 COPY optimized/ /app/hamer/hamer/models/optimized/
