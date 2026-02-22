@@ -33,9 +33,10 @@ WORKDIR /app/raft
 RUN pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 
 # Install remaining deps
-RUN pip install scipy opencv-python-headless Pillow matplotlib tensorboard
+RUN pip install scipy opencv-python-headless Pillow matplotlib tensorboard pymysql
 
-# Copy baseline benchmark script
+# Copy shared DB writer and baseline benchmark script
+COPY bench_db.py /app/raft/bench_db.py
 COPY eval_bench.py /app/raft/eval_bench.py
 
 # Entrypoint script (mounts GCS and creates symlinks)

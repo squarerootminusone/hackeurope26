@@ -32,8 +32,9 @@ class MANOOptimized(smplx.MANOLayer):
         if torch.cuda.is_available():
             self.forward = torch.compile(
                 self.forward,
-                mode="reduce-overhead",
+                mode="default",
                 fullgraph=False,
+                dynamic=True,
             )
         return self
 
@@ -53,7 +54,9 @@ class MANOOptimized(smplx.MANOLayer):
 
 
 def create_optimized_mano(**kwargs):
-    """Factory function that creates a MANOOptimized instance and compiles it if CUDA is available."""
+    """Factory function that creates a MANOOptimized instance.
+    Note: torch.compile() is disabled on MANO because SMPLX uses default
+    parameters with batch=1 that are incompatible with dynamo tracing."""
     mano = MANOOptimized(**kwargs)
-    mano.compile()
+    # Skip compile — SMPLX default params (global_orient batch=1) break dynamo
     return mano

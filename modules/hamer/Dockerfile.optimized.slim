@@ -61,5 +61,8 @@ COPY optimized/eval_optimized.py /app/hamer/eval_optimized.py
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
+# Pre-create results directory
+RUN mkdir -p /app/hamer/results
+
 ENTRYPOINT ["/app/entrypoint.sh", "python"]
-CMD ["eval_optimized.py", "--dataset", "FREIHAND-VAL"]
+CMD ["eval_optimized.py", "--dataset", "FREIHAND-VAL", "--num_workers", "4"]

@@ -1,7 +1,7 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: raft-baseline-l4
+  name: raft-optimized-rtx6000
   namespace: default
 spec:
   backoffLimit: 0
@@ -12,11 +12,11 @@ spec:
     spec:
       serviceAccountName: raft-bench
       nodeSelector:
-        cloud.google.com/gke-accelerator: nvidia-l4
+        cloud.google.com/gke-accelerator: nvidia-rtx-pro-6000
       restartPolicy: Never
       containers:
       - name: raft
-        image: europe-west1-docker.pkg.dev/data-platform-dev-486916/bench-test-images/raft-baseline-slim:latest
+        image: europe-west1-docker.pkg.dev/data-platform-dev-486916/bench-test-images/raft-optimized-slim:latest
         command: ["/bin/bash", "-c"]
         args:
         - |
@@ -26,24 +26,20 @@ spec:
           ls -la /mnt/gcs/ || { echo "ERROR: GCS mount empty"; exit 1; }
           ls /mnt/gcs/models/ || { echo "ERROR: models dir missing"; exit 1; }
 
-          # Create symlinks from CSI-mounted GCS volume
           ln -sf /mnt/gcs/models /app/raft/models
           mkdir -p /app/raft/datasets
           ln -sf /mnt/gcs/datasets/Sintel /app/raft/datasets/Sintel
 
-          # Verify
           echo "==> Verifying data..."
           ls -la /app/raft/models/raft-sintel.pth
           ls /app/raft/datasets/Sintel/training/clean/ | head -5
           ls /app/raft/datasets/Sintel/training/flow/ | head -5
 
-          # Run baseline benchmark
           cd /app/raft
-          python eval_bench.py --model models/raft-sintel.pth --dataset sintel --gpu_accelerator nvidia-l4 --job_name raft-baseline-l4
+          python eval_optimized.py --model models/raft-sintel.pth --dataset sintel --gpu_accelerator nvidia-rtx-pro-6000 --job_name raft-optimized-rtx6000
 
-          # Persist results to GCS (best-effort)
-          cp results/baseline_results.json /mnt/gcs/results/baseline_l4.json || echo "WARN: GCS write failed"
-          echo "==> Done"
+          cp results/optimized_results.json /mnt/gcs/results/optimized_rtx6000.json || echo "WARN: GCS write failed"
+          echo "==> Results saved to GCS"
         env:
         - name: DB_HOST
           valueFrom:

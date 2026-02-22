@@ -7,6 +7,8 @@ Provides a dashboard UI for:
   - Showing the evaluations database
 """
 
+import os
+import sys
 import threading
 import time
 import uuid
@@ -15,6 +17,23 @@ import math
 from datetime import datetime, timedelta
 
 from flask import Flask, jsonify, render_template, request
+
+# Allow importing from project root (src.db)
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from src.db import get_connection, get_db_password, DB_HOST, DB_USER, DB_NAME
+
+import pymysql
+
+# Cache password at import time to avoid slow Secret Manager calls per request
+print("Warming DB password cache from Secret Manager...")
+_cached_password: str = get_db_password()
+print("DB password cached.")
+
+
+def _get_cached_connection() -> pymysql.Connection:
+    return pymysql.connect(
+        host=DB_HOST, user=DB_USER, password=_cached_password, database=DB_NAME,
+    )
 
 app = Flask(__name__)
 
@@ -27,6 +46,7 @@ HOURS_PER_YEAR = 8760
 # Hardware embodied carbon (gCO2) by GPU type
 GPU_TE_GCO2 = {
     "NVIDIA A100 80GB": 150_000,
+    "NVIDIA L4": 100_000,
     "NVIDIA L40S": 120_000,
     "NVIDIA RTX 4090": 85_000,
     "NVIDIA V100": 100_000,
@@ -80,63 +100,54 @@ STEP_DURATIONS = [2, 3, 4, 5, 5, 8, 8, 2, 1]
 
 jobs: dict[str, dict] = {}
 
-# Seed evaluations DB with some prior runs so the table isn't empty
-# Schema matches infra/schema.sql:
-#   id, evaluation_name, model_name, is_optimized, vm_reference,
-#   instance_type, create_date, update_date, start_runtime_date, end_runtime_date
-_SEED_EVALS = [
-    {
-        "id": 1,
-        "evaluation_name": "hamer-baseline-freihand-v1",
-        "model_name": "hamer",
-        "is_optimized": False,
-        "vm_reference": "gpu-a100-eu-west1-001",
-        "instance_type": "NVIDIA A100 80GB",
-        "create_date": "2026-02-20 14:00:00",
-        "update_date": "2026-02-20 15:42:00",
-        "start_runtime_date": "2026-02-20 14:05:00",
-        "end_runtime_date": "2026-02-20 15:42:00",
-    },
-    {
-        "id": 2,
-        "evaluation_name": "hamer-optimized-freihand-v1",
-        "model_name": "hamer",
-        "is_optimized": True,
-        "vm_reference": "gpu-a100-eu-west1-001",
-        "instance_type": "NVIDIA A100 80GB",
-        "create_date": "2026-02-20 16:00:00",
-        "update_date": "2026-02-20 17:28:00",
-        "start_runtime_date": "2026-02-20 16:05:00",
-        "end_runtime_date": "2026-02-20 17:28:00",
-    },
-    {
-        "id": 3,
-        "evaluation_name": "hamer-baseline-freihand-v2",
-        "model_name": "hamer",
-        "is_optimized": False,
-        "vm_reference": "gpu-l40s-us-west1-003",
-        "instance_type": "NVIDIA L40S",
-        "create_date": "2026-02-21 09:00:00",
-        "update_date": "2026-02-21 10:51:00",
-        "start_runtime_date": "2026-02-21 09:10:00",
-        "end_runtime_date": "2026-02-21 10:51:00",
-    },
-    {
-        "id": 4,
-        "evaluation_name": "hamer-optimized-freihand-v2",
-        "model_name": "hamer",
-        "is_optimized": True,
-        "vm_reference": "gpu-l40s-us-west1-003",
-        "instance_type": "NVIDIA L40S",
-        "create_date": "2026-02-21 11:00:00",
-        "update_date": "2026-02-21 12:18:00",
-        "start_runtime_date": "2026-02-21 11:08:00",
-        "end_runtime_date": "2026-02-21 12:18:00",
-    },
-]
 
-_eval_counter = len(_SEED_EVALS)
-evaluations_db: list[dict] = list(_SEED_EVALS)
+def _fetch_evaluations() -> list[dict]:
+    """Fetch evaluations from Cloud SQL (bench-test-eval-db)."""
+    conn = _get_cached_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, evaluation_name, model_name, is_optimized, vm_reference, "
+                "instance_type, create_date, update_date, start_runtime_date, end_runtime_date "
+                "FROM evaluations ORDER BY id DESC"
+            )
+            columns = [desc[0] for desc in cur.description]
+            rows = []
+            for row in cur.fetchall():
+                d = dict(zip(columns, row))
+                # Convert datetimes to strings for JSON serialization
+                for k, v in d.items():
+                    if hasattr(v, "strftime"):
+                        d[k] = v.strftime("%Y-%m-%d %H:%M:%S")
+                d["is_optimized"] = bool(d["is_optimized"])
+                rows.append(d)
+            return rows
+    finally:
+        conn.close()
+
+
+def _fetch_benchmark_results() -> list[dict]:
+    """Fetch benchmark results from Cloud SQL (bench-test-eval-db)."""
+    conn = _get_cached_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, module, variant, gpu, gpu_accelerator, dataset, "
+                "metric_name, metric_value, throughput, avg_latency_ms, "
+                "eval_time_sec, total_pairs, extra_metrics, job_name, created_at "
+                "FROM benchmark_results ORDER BY id DESC"
+            )
+            columns = [desc[0] for desc in cur.description]
+            rows = []
+            for row in cur.fetchall():
+                d = dict(zip(columns, row))
+                for k, v in d.items():
+                    if hasattr(v, "strftime"):
+                        d[k] = v.strftime("%Y-%m-%d %H:%M:%S")
+                rows.append(d)
+            return rows
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -230,9 +241,24 @@ def _build_sci_results(params: dict) -> dict:
 # Pipeline simulation (background thread)
 # ---------------------------------------------------------------------------
 
+def _insert_evaluation(name: str, model: str, is_optimized: bool, vm_ref: str, instance_type: str):
+    """Insert an evaluation row into Cloud SQL."""
+    try:
+        conn = _get_cached_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO evaluations (evaluation_name, model_name, is_optimized, vm_reference, instance_type, "
+                "start_runtime_date) VALUES (%s, %s, %s, %s, %s, NOW())",
+                (name, model, is_optimized, vm_ref, instance_type),
+            )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Warning: failed to insert evaluation: {e}")
+
+
 def _simulate_pipeline(job_id: str):
     """Run through each pipeline step with a realistic delay."""
-    global _eval_counter
     job = jobs[job_id]
 
     for idx, ((step_key, step_label), duration) in enumerate(
@@ -252,44 +278,22 @@ def _simulate_pipeline(job_id: str):
         job["steps"][idx]["status"] = "done"
         job["steps"][idx]["finished_at"] = datetime.utcnow().isoformat()
 
-        # After eval steps, add records to evaluations DB (matches schema.sql)
+        # After eval steps, insert into real DB
         if step_key == "eval_baseline":
-            _eval_counter += 1
             repo_name = job["params"].get("repo_url", "").rstrip("/").split("/")[-1]
             gpu = job["params"].get("gpu_type", "NVIDIA A100 80GB")
-            now = datetime.utcnow()
-            end = now + timedelta(hours=1, minutes=30)
-            evaluations_db.append({
-                "id": _eval_counter,
-                "evaluation_name": f"{repo_name}-baseline-run{_eval_counter}",
-                "model_name": repo_name,
-                "is_optimized": False,
-                "vm_reference": f"gpu-{gpu.lower().replace(' ', '-').replace('nvidia-', '')}-001",
-                "instance_type": gpu,
-                "create_date": now.strftime("%Y-%m-%d %H:%M:%S"),
-                "update_date": end.strftime("%Y-%m-%d %H:%M:%S"),
-                "start_runtime_date": (now + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S"),
-                "end_runtime_date": end.strftime("%Y-%m-%d %H:%M:%S"),
-            })
+            vm_ref = f"gpu-{gpu.lower().replace(' ', '-').replace('nvidia-', '')}-001"
+            _insert_evaluation(
+                f"{repo_name}-baseline-{job_id[:8]}", repo_name, False, vm_ref, gpu,
+            )
 
         elif step_key == "eval_optimized":
-            _eval_counter += 1
             repo_name = job["params"].get("repo_url", "").rstrip("/").split("/")[-1]
             gpu = job["params"].get("gpu_type", "NVIDIA A100 80GB")
-            now = datetime.utcnow()
-            end = now + timedelta(hours=1, minutes=10)
-            evaluations_db.append({
-                "id": _eval_counter,
-                "evaluation_name": f"{repo_name}-optimized-run{_eval_counter}",
-                "model_name": repo_name,
-                "is_optimized": True,
-                "vm_reference": f"gpu-{gpu.lower().replace(' ', '-').replace('nvidia-', '')}-001",
-                "instance_type": gpu,
-                "create_date": now.strftime("%Y-%m-%d %H:%M:%S"),
-                "update_date": end.strftime("%Y-%m-%d %H:%M:%S"),
-                "start_runtime_date": (now + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M:%S"),
-                "end_runtime_date": end.strftime("%Y-%m-%d %H:%M:%S"),
-            })
+            vm_ref = f"gpu-{gpu.lower().replace(' ', '-').replace('nvidia-', '')}-001"
+            _insert_evaluation(
+                f"{repo_name}-optimized-{job_id[:8]}", repo_name, True, vm_ref, gpu,
+            )
 
         elif step_key == "sci_calc":
             # Compute SCI results now
@@ -377,8 +381,22 @@ def api_cancel(job_id: str):
 
 @app.route("/api/evaluations")
 def api_evaluations():
-    """Return the evaluations database (latest first)."""
-    return jsonify(list(reversed(evaluations_db)))
+    """Return the evaluations database from Cloud SQL (latest first)."""
+    try:
+        rows = _fetch_evaluations()
+        return jsonify(rows)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/benchmark_results")
+def api_benchmark_results():
+    """Return benchmark results from Cloud SQL (latest first)."""
+    try:
+        rows = _fetch_benchmark_results()
+        return jsonify(rows)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/jobs")

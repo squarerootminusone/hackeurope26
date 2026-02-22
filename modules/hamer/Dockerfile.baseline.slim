@@ -55,5 +55,8 @@ RUN sed -i 's|model = HAMER.load_from_checkpoint(checkpoint_path, strict=False, 
 COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
+# Pre-create results directory
+RUN mkdir -p /app/hamer/results
+
 ENTRYPOINT ["/app/entrypoint.sh", "python"]
-CMD ["eval.py", "--dataset", "FREIHAND-VAL"]
+CMD ["eval.py", "--dataset", "FREIHAND-VAL", "--num_workers", "4"]

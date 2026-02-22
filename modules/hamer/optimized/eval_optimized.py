@@ -19,7 +19,7 @@ sys.path.insert(0, '/app/hamer')
 from hamer.configs import CACHE_DIR_HAMER, get_config
 from hamer.models import download_models, load_hamer
 from hamer.datasets import create_dataset
-from hamer.utils.eval_utils import Evaluator, recursive_to
+from hamer.utils import Evaluator, recursive_to
 
 # Import from the optimized module
 from hamer.models.optimized import load_hamer_optimized

@@ -45,6 +45,8 @@ spec:
             - name: gcs-deps
               mountPath: /mnt/gcs
               readOnly: true
+            - name: dshm
+              mountPath: /dev/shm
       volumes:
         - name: gcs-deps
           csi:
@@ -53,6 +55,10 @@ spec:
             volumeAttributes:
               bucketName: bench-test-dependencies-data-platform-dev-486916
               mountOptions: "only-dir=hamer,implicit-dirs"
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 4Gi
 
 ---
 apiVersion: batch/v1
@@ -73,7 +79,7 @@ spec:
         cloud.google.com/gke-accelerator: nvidia-l4
       containers:
         - name: hamer
-          image: europe-west1-docker.pkg.dev/data-platform-dev-486916/bench-test-images/hamer-optimized-slim:latest
+          image: europe-west1-docker.pkg.dev/data-platform-dev-486916/bench-test-images/hamer-optimized-slim@sha256:49d1335fe5f38ef9bdc5dce667fd1d2dc8dca27286674d9dae107453d0c4cb8b
           env:
             - name: PYOPENGL_PLATFORM
               value: osmesa
@@ -92,6 +98,8 @@ spec:
             - name: gcs-deps
               mountPath: /mnt/gcs
               readOnly: true
+            - name: dshm
+              mountPath: /dev/shm
       volumes:
         - name: gcs-deps
           csi:
@@ -100,3 +108,7 @@ spec:
             volumeAttributes:
               bucketName: bench-test-dependencies-data-platform-dev-486916
               mountOptions: "only-dir=hamer,implicit-dirs"
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 4Gi

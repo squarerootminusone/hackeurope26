@@ -9,6 +9,8 @@ let startTime    = null;
 let elapsedTimer = null;
 let breakdownChart = null;
 let sciChart = null;
+let cachedBenchRows = [];
+let selectedPipelineKey = null;
 
 // Carbon intensity lookup (must mirror backend ZONE_INTENSITY)
 const ZONE_INTENSITY = {
@@ -20,71 +22,19 @@ const ZONE_INTENSITY = {
 // GPU embodied carbon lookup
 const GPU_TE = {
   'NVIDIA A100 80GB': 150000,
+  'NVIDIA L4': 100000,
   'NVIDIA L40S': 120000,
   'NVIDIA RTX 4090': 85000,
   'NVIDIA V100': 100000,
   'NVIDIA T4': 70000
 };
 
-// Step keys (matches backend PIPELINE_STEPS)
-const STEP_META = [
-  { key: 'clone',           icon: '⬇', label: 'Clone' },
-  { key: 'analyze',         icon: '🔍', label: 'Analyse' },
-  { key: 'optimize',        icon: '⚡', label: 'Optimise' },
-  { key: 'build_baseline',  icon: '🐳', label: 'Build Base' },
-  { key: 'build_optimized', icon: '🐳', label: 'Build Opt' },
-  { key: 'eval_baseline',   icon: '📊', label: 'Eval Base' },
-  { key: 'eval_optimized',  icon: '📊', label: 'Eval Opt' },
-  { key: 'sci_calc',        icon: '🧮', label: 'SCI Calc' },
-  { key: 'report',          icon: '📄', label: 'Report' },
-];
-
 // -----------------------------------------------------------------------
-// Initialise steps in the DOM
-// -----------------------------------------------------------------------
-
-function initSteps() {
-  const container = document.getElementById('steps-container');
-  container.innerHTML = STEP_META.map((s, i) => `
-    <div id="step-${i}" class="flex flex-col items-center gap-1 p-2 rounded-lg bg-surface-800 border border-surface-600 transition-all">
-      <div id="step-icon-${i}"
-           class="w-8 h-8 rounded-full bg-surface-700 border border-surface-500 flex items-center justify-center text-base transition-all">
-        <span class="text-gray-600">○</span>
-      </div>
-      <span class="text-center text-gray-600 leading-tight" style="font-size:10px">${s.label}</span>
-    </div>
-  `).join('');
-}
-
-function updateStep(idx, status) {
-  const iconEl = document.getElementById(`step-icon-${idx}`);
-  const cardEl = document.getElementById(`step-${idx}`);
-  if (!iconEl || !cardEl) return;
-
-  iconEl.classList.remove('step-running');
-
-  if (status === 'done') {
-    iconEl.className = 'w-8 h-8 rounded-full bg-brand-800 border border-brand-500 flex items-center justify-center text-base transition-all';
-    iconEl.innerHTML = '<span class="text-brand-400">✓</span>';
-    cardEl.className = 'flex flex-col items-center gap-1 p-2 rounded-lg bg-surface-800 border border-brand-800/50 transition-all';
-  } else if (status === 'running') {
-    iconEl.className = 'w-8 h-8 rounded-full bg-surface-700 border border-brand-500 flex items-center justify-center text-base transition-all step-running';
-    iconEl.innerHTML = `<span class="text-brand-400">${STEP_META[idx].icon}</span>`;
-    cardEl.className = 'flex flex-col items-center gap-1 p-2 rounded-lg bg-surface-700 border border-brand-600 transition-all';
-  } else {
-    iconEl.className = 'w-8 h-8 rounded-full bg-surface-700 border border-surface-500 flex items-center justify-center text-base transition-all';
-    iconEl.innerHTML = '<span class="text-gray-600">○</span>';
-    cardEl.className = 'flex flex-col items-center gap-1 p-2 rounded-lg bg-surface-800 border border-surface-600 transition-all';
-  }
-}
-
-// -----------------------------------------------------------------------
-// Zone / GPU hint updates
+// Initialise
 // -----------------------------------------------------------------------
 
 document.addEventListener('DOMContentLoaded', () => {
-  initSteps();
-  loadEvaluations();
+  loadBenchmarkResults();
 
   document.getElementById('zone').addEventListener('change', function () {
     const z = this.value;
@@ -119,12 +69,9 @@ async function startPipeline() {
     api_key:          document.getElementById('api_key').value.trim(),
   };
 
-  // Reset UI
-  resetDashboard();
   setStatusBadge('running', 'Running');
   document.getElementById('btn-run').disabled = true;
   document.getElementById('btn-cancel').disabled = false;
-  document.getElementById('idle-placeholder').style.display = 'none';
 
   startTime = Date.now();
   elapsedTimer = setInterval(updateElapsed, 1000);
@@ -156,7 +103,6 @@ async function cancelPipeline() {
   stopPolling();
   setStatusBadge('idle', 'Cancelled');
   resetControls();
-  document.getElementById('progress-label').textContent = 'Cancelled';
 }
 
 // -----------------------------------------------------------------------
@@ -168,14 +114,13 @@ async function pollJob() {
   try {
     const res = await fetch(`/api/jobs/${currentJobId}`);
     const job = await res.json();
-    updatePipelineUI(job);
 
     if (job.status === 'completed') {
       stopPolling();
       setStatusBadge('done', 'Completed');
       resetControls();
       if (job.sci_results) renderDashboard(job.sci_results);
-      loadEvaluations();
+      loadBenchmarkResults();
       refreshHistory();
     } else if (job.status === 'cancelled') {
       stopPolling();
@@ -187,40 +132,11 @@ async function pollJob() {
 }
 
 // -----------------------------------------------------------------------
-// Update pipeline step indicators + progress bar
-// -----------------------------------------------------------------------
-
-function updatePipelineUI(job) {
-  const total = STEP_META.length;
-  let done = 0;
-
-  job.steps.forEach((step, idx) => {
-    updateStep(idx, step.status);
-    if (step.status === 'done') done++;
-  });
-
-  const pct = Math.round((done / total) * 100);
-  document.getElementById('progress-bar').style.width = pct + '%';
-  document.getElementById('progress-pct').textContent = pct + '%';
-
-  const currentIdx = job.current_step;
-  if (currentIdx >= 0 && currentIdx < STEP_META.length) {
-    document.getElementById('progress-label').textContent =
-      STEP_META[currentIdx].label + '…';
-  }
-  if (job.status === 'completed') {
-    document.getElementById('progress-label').textContent = 'Pipeline complete';
-  }
-}
-
-// -----------------------------------------------------------------------
 // Render SCI dashboard
 // -----------------------------------------------------------------------
 
 function renderDashboard(r) {
-  // Show dashboard, hide idle placeholder
   document.getElementById('sci-dashboard').style.display = 'block';
-  document.getElementById('idle-placeholder').style.display = 'none';
 
   const b = r.baseline;
   const o = r.optimized;
@@ -379,52 +295,225 @@ function renderSciChart(bSci, oSci) {
 }
 
 // -----------------------------------------------------------------------
-// Evaluations DB
+// Benchmark Results
 // -----------------------------------------------------------------------
 
-async function loadEvaluations() {
+async function loadBenchmarkResults() {
   try {
-    const res = await fetch('/api/evaluations');
-    const evals = await res.json();
-    renderEvalTable(evals);
+    const res = await fetch('/api/benchmark_results');
+    cachedBenchRows = await res.json();
+    renderBenchTable(cachedBenchRows);
   } catch (e) {
-    console.error('Failed to load evaluations:', e);
+    console.error('Failed to load benchmark results:', e);
   }
 }
 
-function renderEvalTable(evals) {
-  const tbody = document.getElementById('eval-table-body');
-  if (!evals.length) {
-    tbody.innerHTML = `<tr><td colspan="10" class="px-4 py-4 text-center text-gray-600 italic">No evaluations found.</td></tr>`;
+// -----------------------------------------------------------------------
+// Group rows into pipeline runs (baseline+optimized pair by module+gpu+time)
+// -----------------------------------------------------------------------
+
+function groupIntoPipelines(rows) {
+  // Each job_name like "raft-baseline-l4" or "raft-optimized-l4" has multiple
+  // metric rows (one per dataset). Group by job_name first.
+  const byJob = {};
+  for (const r of rows) {
+    if (!byJob[r.job_name]) byJob[r.job_name] = [];
+    byJob[r.job_name].push(r);
+  }
+
+  // Now pair baseline+optimized jobs by module+gpu_accelerator+close timestamps.
+  // Sort jobs by created_at ascending to pair them in order.
+  const jobList = Object.entries(byJob).map(([name, recs]) => ({
+    name,
+    variant: recs[0].variant,
+    module: recs[0].module,
+    gpu: recs[0].gpu,
+    gpu_accelerator: recs[0].gpu_accelerator,
+    created_at: recs[0].created_at,
+    rows: recs,
+  }));
+  jobList.sort((a, b) => a.created_at.localeCompare(b.created_at));
+
+  const pipelines = [];
+  const used = new Set();
+
+  for (const job of jobList) {
+    if (used.has(job.name)) continue;
+    if (job.variant !== 'baseline') continue;
+
+    // Find the closest optimized job with same module+gpu_accelerator
+    let bestMatch = null;
+    for (const other of jobList) {
+      if (used.has(other.name)) continue;
+      if (other.variant !== 'optimized') continue;
+      if (other.module !== job.module || other.gpu_accelerator !== job.gpu_accelerator) continue;
+      if (other.created_at >= job.created_at) {
+        bestMatch = other;
+        break;
+      }
+    }
+
+    if (bestMatch) {
+      const key = `${job.module}|${job.gpu_accelerator}|${job.created_at}`;
+      pipelines.push({
+        key,
+        module: job.module,
+        gpu: job.gpu,
+        baseline: job,
+        optimized: bestMatch,
+        created_at: job.created_at,
+      });
+      used.add(job.name);
+      used.add(bestMatch.name);
+    }
+  }
+
+  return pipelines;
+}
+
+// -----------------------------------------------------------------------
+// Select a pipeline and compute SCI
+// -----------------------------------------------------------------------
+
+function selectPipeline(key) {
+  selectedPipelineKey = key;
+  // Re-render table to update highlight
+  renderBenchTable(cachedBenchRows);
+
+  const pipelines = groupIntoPipelines(cachedBenchRows);
+  const pipeline = pipelines.find(p => p.key === key);
+  if (!pipeline) return;
+
+  // Use first row from each side for eval_time_sec (same across datasets)
+  const bRow = pipeline.baseline.rows[0];
+  const oRow = pipeline.optimized.rows[0];
+
+  // Read sidebar params
+  const zone = document.getElementById('zone').value;
+  const intensity = ZONE_INTENSITY[zone] ?? 475;
+  const gpuType = document.getElementById('gpu_type').value;
+  const te_gco2 = GPU_TE[gpuType] ?? 150000;
+  const lifespan = parseFloat(document.getElementById('lifespan_years').value) || 4;
+  const R = parseInt(document.getElementById('functional_units').value) || 10000;
+
+  const GPU_POWER_KW = {
+    'NVIDIA A100 80GB': 0.300,
+    'NVIDIA L4': 0.072,
+    'NVIDIA L40S': 0.350,
+    'NVIDIA RTX 4090': 0.450,
+    'NVIDIA V100': 0.300,
+    'NVIDIA T4': 0.070,
+  };
+  const powerKw = GPU_POWER_KW[gpuType] ?? 0.300;
+
+  const bEnergyKwh = powerKw * (bRow.eval_time_sec / 3600);
+  const oEnergyKwh = powerKw * (oRow.eval_time_sec / 3600);
+  const bDurationH = bRow.eval_time_sec / 3600;
+  const oDurationH = oRow.eval_time_sec / 3600;
+  const bEmbodied = te_gco2 * (bDurationH / (lifespan * 8760));
+  const oEmbodied = te_gco2 * (oDurationH / (lifespan * 8760));
+  const bSci = (bEnergyKwh * intensity + bEmbodied) / R;
+  const oSci = (oEnergyKwh * intensity + oEmbodied) / R;
+  const bTotal = bEnergyKwh * intensity + bEmbodied;
+  const oTotal = oEnergyKwh * intensity + oEmbodied;
+
+  renderDashboard({
+    zone,
+    intensity,
+    gpu_type: pipeline.gpu,
+    te_gco2,
+    lifespan_years: lifespan,
+    functional_units: R,
+    optimisations_applied: [
+      'torch.compile() on model forward pass (reduce-overhead mode)',
+      'AMP bfloat16 autocast during inference',
+    ],
+    baseline: {
+      energy_kwh: bEnergyKwh,
+      duration_h: bDurationH,
+      embodied_gco2: bEmbodied,
+      ei_gco2: bEnergyKwh * intensity,
+      total_gco2: bTotal,
+      sci: bSci,
+    },
+    optimized: {
+      energy_kwh: oEnergyKwh,
+      duration_h: oDurationH,
+      embodied_gco2: oEmbodied,
+      ei_gco2: oEnergyKwh * intensity,
+      total_gco2: oTotal,
+      sci: oSci,
+    },
+    reduction: {
+      energy_pct: (bEnergyKwh - oEnergyKwh) / bEnergyKwh * 100,
+      sci_pct: (bSci - oSci) / bSci * 100,
+      co2_saved_gco2: bTotal - oTotal,
+    },
+  });
+}
+
+// -----------------------------------------------------------------------
+// Render benchmark table with pipeline grouping + row selection
+// -----------------------------------------------------------------------
+
+function renderBenchTable(rows) {
+  const tbody = document.getElementById('bench-table-body');
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="12" class="px-4 py-4 text-center text-gray-600 italic">No benchmark results found.</td></tr>`;
     return;
   }
 
-  tbody.innerHTML = evals.map(e => {
-    const optClass = e.is_optimized
+  const pipelines = groupIntoPipelines(rows);
+
+  // Build a set of job_names belonging to the selected pipeline
+  const selectedJobs = new Set();
+  if (selectedPipelineKey) {
+    const sel = pipelines.find(p => p.key === selectedPipelineKey);
+    if (sel) {
+      selectedJobs.add(sel.baseline.name);
+      selectedJobs.add(sel.optimized.name);
+    }
+  }
+
+  // Map each row to its pipeline key
+  const rowToPipeline = {};
+  for (const p of pipelines) {
+    for (const r of p.baseline.rows) rowToPipeline[r.id] = p.key;
+    for (const r of p.optimized.rows) rowToPipeline[r.id] = p.key;
+  }
+
+  tbody.innerHTML = rows.map(r => {
+    const variantClass = r.variant === 'optimized'
       ? 'text-brand-400 bg-brand-900/30 border border-brand-800'
       : 'text-blue-400 bg-blue-900/30 border border-blue-900';
-    const optLabel = e.is_optimized ? 'Yes' : 'No';
 
-    return `<tr class="hover:bg-surface-600/30 transition-colors">
-      <td class="px-4 py-2.5 text-gray-400">#${e.id}</td>
-      <td class="px-4 py-2.5 text-gray-200 font-mono text-xs max-w-[180px] truncate" title="${e.evaluation_name}">${e.evaluation_name}</td>
-      <td class="px-4 py-2.5 text-gray-300 font-mono text-xs">${e.model_name ?? '—'}</td>
+    const pKey = rowToPipeline[r.id];
+    const isSelected = selectedJobs.has(r.job_name);
+    const selectedClass = isSelected ? 'bg-brand-900/20 border-l-2 border-l-brand-500' : '';
+    const cursor = pKey ? 'cursor-pointer' : '';
+
+    return `<tr class="hover:bg-surface-600/30 transition-colors ${selectedClass} ${cursor}"
+                onclick="${pKey ? `selectPipeline('${pKey}')` : ''}">
+      <td class="px-4 py-2.5 text-gray-400">#${r.id}</td>
+      <td class="px-4 py-2.5 text-gray-200 font-mono text-xs">${r.job_name ?? '—'}</td>
+      <td class="px-4 py-2.5 text-gray-300">${r.module}</td>
       <td class="px-4 py-2.5">
-        <span class="px-2 py-0.5 rounded-full text-xs font-medium ${optClass}">${optLabel}</span>
+        <span class="px-2 py-0.5 rounded-full text-xs font-medium ${variantClass}">${r.variant}</span>
       </td>
-      <td class="px-4 py-2.5 text-gray-400 font-mono text-xs">${e.vm_reference}</td>
-      <td class="px-4 py-2.5 text-gray-400 text-xs">${e.instance_type ?? '—'}</td>
-      <td class="px-4 py-2.5 text-gray-500">${fmtDate(e.create_date)}</td>
-      <td class="px-4 py-2.5 text-gray-500">${fmtDate(e.start_runtime_date)}</td>
-      <td class="px-4 py-2.5 text-gray-500">${fmtDate(e.end_runtime_date)}</td>
-      <td class="px-4 py-2.5 text-gray-500">${fmtDate(e.update_date)}</td>
+      <td class="px-4 py-2.5 text-gray-400 text-xs">${r.gpu}</td>
+      <td class="px-4 py-2.5 text-gray-300 font-mono text-xs">${r.dataset}</td>
+      <td class="px-4 py-2.5 text-gray-300 font-mono text-xs">${r.metric_name}</td>
+      <td class="px-4 py-2.5 text-gray-200 font-mono">${Number(r.metric_value).toFixed(4)}</td>
+      <td class="px-4 py-2.5 text-gray-300 font-mono">${r.throughput ? Number(r.throughput).toFixed(2) + ' img/s' : '—'}</td>
+      <td class="px-4 py-2.5 text-gray-300 font-mono">${r.avg_latency_ms ? Number(r.avg_latency_ms).toFixed(1) + ' ms' : '—'}</td>
+      <td class="px-4 py-2.5 text-gray-300 font-mono">${r.eval_time_sec ? Number(r.eval_time_sec).toFixed(1) + ' s' : '—'}</td>
+      <td class="px-4 py-2.5 text-gray-500">${fmtDate(r.created_at)}</td>
     </tr>`;
   }).join('');
 }
 
 function fmtDate(d) {
   if (!d) return '—';
-  // Show only HH:MM if today, else date + time
   const dt = new Date(d.replace(' ', 'T') + 'Z');
   return dt.toLocaleString('en-GB', { dateStyle: 'short', timeStyle: 'short' });
 }
@@ -504,22 +593,4 @@ function stopPolling() {
 function resetControls() {
   document.getElementById('btn-run').disabled    = false;
   document.getElementById('btn-cancel').disabled = true;
-}
-
-function resetDashboard() {
-  // Reset all step icons
-  STEP_META.forEach((_, i) => updateStep(i, 'pending'));
-
-  // Progress bar
-  document.getElementById('progress-bar').style.width = '0%';
-  document.getElementById('progress-pct').textContent = '0%';
-  document.getElementById('progress-label').textContent = 'Starting…';
-  document.getElementById('elapsed-time').textContent = '';
-
-  // Hide results
-  document.getElementById('sci-dashboard').style.display = 'none';
-
-  // Destroy charts
-  if (breakdownChart) { breakdownChart.destroy(); breakdownChart = null; }
-  if (sciChart)       { sciChart.destroy();       sciChart = null; }
 }

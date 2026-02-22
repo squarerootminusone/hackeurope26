@@ -1,0 +1,6 @@
+encryptionsalt: v1:zuhznL6rvS0=:v1:sX/V6K/EUkWw+pNG:IuL30RvEL4Z7VqsoqFhofnmIfIq12g==
+config:
+  gcp:project: data-platform-dev-486916
+  gcp:region: us-central1
+  bench-test-infra:dbPassword:
+    secure: v1:rRIfUj1rHcRFL5OO:/165N1h0LWApfmWHSkvdbMSPlVJFzM42UaP8m3n0JDCqEDl/7cUYaA==

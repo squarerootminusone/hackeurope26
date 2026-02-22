@@ -1,42 +1,12 @@
-"""Database connection helper using Cloud SQL and Secret Manager."""
+"""
+Lightweight DB writer for use inside benchmark containers.
+Reads connection info from env vars (DB_HOST, DB_USER, DB_PASSWORD, DB_NAME).
+Copy this file into Docker images alongside eval scripts.
+"""
 
 import json
 import os
 import pymysql
-from google.cloud import secretmanager
-
-PROJECT = "data-platform-dev-486916"
-SECRET_ID = "eval-db-password"
-DB_HOST = "35.205.179.231"
-DB_USER = "eval_user"
-DB_NAME = "evaluations_db"
-
-
-def get_db_password() -> str:
-    client = secretmanager.SecretManagerServiceClient()
-    name = f"projects/{PROJECT}/secrets/{SECRET_ID}/versions/latest"
-    response = client.access_secret_version(request={"name": name})
-    return response.payload.data.decode("utf-8")
-
-
-def get_connection() -> pymysql.Connection:
-    """Get DB connection using Secret Manager (for orchestration code)."""
-    return pymysql.connect(
-        host=DB_HOST,
-        user=DB_USER,
-        password=get_db_password(),
-        database=DB_NAME,
-    )
-
-
-def get_connection_from_env() -> pymysql.Connection:
-    """Get DB connection from env vars (for use inside containers)."""
-    return pymysql.connect(
-        host=os.environ['DB_HOST'],
-        user=os.environ['DB_USER'],
-        password=os.environ['DB_PASSWORD'],
-        database=os.environ['DB_NAME'],
-    )
 
 
 def write_benchmark_result(
@@ -46,17 +16,14 @@ def write_benchmark_result(
     gpu_accelerator: str,
     job_name: str,
     dataset: str,
-    metric_splits: list[str],
+    metric_splits: list,
     metric_name: str = 'epe',
-    extra_keys: list[str] | None = None,
-    conn: pymysql.Connection | None = None,
+    extra_keys: list = None,
 ):
     """Write benchmark results to the benchmark_results table.
 
     Args:
         results: Dict with per-split metrics and a 'timing' key.
-            Each split should have at least `metric_name` and any `extra_keys`.
-            timing should have: total_time_sec, total_pairs, pairs_per_sec, avg_ms_per_pair.
         module: Module name (e.g. 'raft', 'hamer').
         variant: 'baseline' or 'optimized'.
         gpu_accelerator: GKE accelerator label (e.g. 'nvidia-l4').
@@ -65,18 +32,21 @@ def write_benchmark_result(
         metric_splits: List of splits to write (e.g. ['clean', 'final']).
         metric_name: Primary metric field name (default 'epe').
         extra_keys: Additional metric keys to store in extra_metrics JSON.
-        conn: Optional existing connection. If None, connects from env vars.
     """
     import torch
 
-    close_conn = False
-    if conn is None:
-        conn = get_connection_from_env()
-        close_conn = True
+    db_host = os.environ.get('DB_HOST')
+    db_user = os.environ.get('DB_USER')
+    db_pass = os.environ.get('DB_PASSWORD')
+    db_name = os.environ.get('DB_NAME')
+    if not all([db_host, db_user, db_pass, db_name]):
+        print("WARNING: DB env vars not set, skipping DB write")
+        return
 
     gpu = torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'cpu'
     timing = results['timing']
 
+    conn = pymysql.connect(host=db_host, user=db_user, password=db_pass, database=db_name)
     try:
         with conn.cursor() as cur:
             for split in metric_splits:
@@ -101,5 +71,4 @@ def write_benchmark_result(
         conn.commit()
         print(f"Results written to DB ({conn.host})")
     finally:
-        if close_conn:
-            conn.close()
+        conn.close()

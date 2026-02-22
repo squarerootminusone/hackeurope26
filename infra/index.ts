@@ -12,8 +12,11 @@ const REGION = gcpConfig.require("region");
 const dbPassword = config.requireSecret("dbPassword");
 const labels = { "bench-test": "true" };
 
+// Short region tag for naming (e.g. "ew1" for europe-west1, "usc1" for us-central1)
+const RTAG = REGION.replace("europe-west", "ew").replace("us-central", "usc").replace(/-/g, "");
+
 // =============================================================================
-// VPC & Subnet
+// VPC (shared name — Pulumi will adopt the existing one per stack)
 // =============================================================================
 
 const network = new gcp.compute.Network("bench-test", {
@@ -23,14 +26,20 @@ const network = new gcp.compute.Network("bench-test", {
 });
 
 const subnet = new gcp.compute.Subnetwork("bench-test-subnet", {
-  name: "bench-test-subnet",
+  name: `bench-test-${RTAG}`,
   network: network.id,
-  ipCidrRange: "10.0.0.0/20",
+  ipCidrRange: REGION === "europe-west1" ? "10.0.0.0/20" : "10.2.0.0/20",
   region: REGION,
   project: PROJECT,
   secondaryIpRanges: [
-    { rangeName: "gke-pods", ipCidrRange: "10.4.0.0/14" },
-    { rangeName: "gke-services", ipCidrRange: "10.8.0.0/20" },
+    {
+      rangeName: `gke-pods-${RTAG}`,
+      ipCidrRange: REGION === "europe-west1" ? "10.4.0.0/14" : "10.16.0.0/14",
+    },
+    {
+      rangeName: `gke-services-${RTAG}`,
+      ipCidrRange: REGION === "europe-west1" ? "10.8.0.0/20" : "10.20.0.0/20",
+    },
   ],
 });
 
@@ -39,15 +48,15 @@ const subnet = new gcp.compute.Subnetwork("bench-test-subnet", {
 // =============================================================================
 
 const cluster = new gcp.container.Cluster("bench-test-cluster", {
-  name: "bench-test-cluster",
+  name: `bench-test-cluster-${RTAG}`,
   location: REGION,
   project: PROJECT,
   enableAutopilot: true,
   network: network.id,
   subnetwork: subnet.id,
   ipAllocationPolicy: {
-    clusterSecondaryRangeName: "gke-pods",
-    servicesSecondaryRangeName: "gke-services",
+    clusterSecondaryRangeName: `gke-pods-${RTAG}`,
+    servicesSecondaryRangeName: `gke-services-${RTAG}`,
   },
   releaseChannel: { channel: "REGULAR" },
   deletionProtection: false,
@@ -59,7 +68,7 @@ const cluster = new gcp.container.Cluster("bench-test-cluster", {
 // =============================================================================
 
 const sqlInstance = new gcp.sql.DatabaseInstance("bench-test-eval-db", {
-  name: "bench-test-eval-db",
+  name: `bench-test-eval-db-${RTAG}`,
   databaseVersion: "MYSQL_8_0",
   region: REGION,
   project: PROJECT,
@@ -69,6 +78,7 @@ const sqlInstance = new gcp.sql.DatabaseInstance("bench-test-eval-db", {
     diskSize: 10,
     ipConfiguration: {
       ipv4Enabled: true,
+      authorizedNetworks: [{ value: "0.0.0.0/0", name: "all" }],
     },
     userLabels: labels,
   },
@@ -94,7 +104,7 @@ const sqlUser = new gcp.sql.User("eval-user", {
 // =============================================================================
 
 const bucket = new gcp.storage.Bucket("bench-test-dependencies", {
-  name: `bench-test-dependencies-${PROJECT}`,
+  name: `bench-test-dependencies-${RTAG}-${PROJECT}`,
   location: REGION,
   project: PROJECT,
   uniformBucketLevelAccess: true,
@@ -119,7 +129,7 @@ const registry = new gcp.artifactregistry.Repository("bench-test-images", {
 // =============================================================================
 
 const dbPasswordSecret = new gcp.secretmanager.Secret("eval-db-password", {
-  secretId: "eval-db-password",
+  secretId: `eval-db-password-${RTAG}`,
   project: PROJECT,
   replication: { auto: {} },
   labels: labels,
@@ -135,7 +145,7 @@ const dbPasswordVersion = new gcp.secretmanager.SecretVersion("eval-db-password-
 // =============================================================================
 
 const buildVm = new gcp.compute.Instance("build-vm", {
-  name: "build-vm",
+  name: `build-vm-${RTAG}`,
   zone: `${REGION}-b`,
   machineType: "e2-standard-16",
   project: PROJECT,
@@ -150,7 +160,7 @@ const buildVm = new gcp.compute.Instance("build-vm", {
     {
       network: network.id,
       subnetwork: subnet.id,
-      accessConfigs: [{}], // ephemeral public IP
+      accessConfigs: [{}],
     },
   ],
   serviceAccount: {
@@ -163,10 +173,10 @@ const buildVm = new gcp.compute.Instance("build-vm", {
 // Workload Identity — HaMeR
 // =============================================================================
 
-const hamerGsaName = "hamer-bench";
+const hamerGsaName = `hamer-bench-${RTAG}`;
 const hamerGsa = new gcp.serviceaccount.Account("hamer-bench-sa", {
   accountId: hamerGsaName,
-  displayName: "HaMeR benchmark Workload Identity SA",
+  displayName: `HaMeR benchmark WI SA (${REGION})`,
   project: PROJECT,
 });
 
@@ -186,16 +196,22 @@ new gcp.serviceaccount.IAMMember("hamer-wi-binding", {
 // Workload Identity — RAFT
 // =============================================================================
 
-const raftGsaName = "raft-bench";
+const raftGsaName = `raft-bench-${RTAG}`;
 const raftGsa = new gcp.serviceaccount.Account("raft-bench-sa", {
   accountId: raftGsaName,
-  displayName: "RAFT benchmark Workload Identity SA",
+  displayName: `RAFT benchmark WI SA (${REGION})`,
   project: PROJECT,
 });
 
 new gcp.storage.BucketIAMMember("raft-gsa-bucket-reader", {
   bucket: bucket.name,
   role: "roles/storage.objectViewer",
+  member: pulumi.interpolate`serviceAccount:${raftGsa.email}`,
+});
+
+new gcp.storage.BucketIAMMember("raft-gsa-bucket-writer", {
+  bucket: bucket.name,
+  role: "roles/storage.objectCreator",
   member: pulumi.interpolate`serviceAccount:${raftGsa.email}`,
 });
 

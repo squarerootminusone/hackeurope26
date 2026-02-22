@@ -39,11 +39,32 @@ spec:
 
           # Run optimized benchmark
           cd /app/raft
-          python eval_optimized.py --model models/raft-sintel.pth --dataset sintel
+          python eval_optimized.py --model models/raft-sintel.pth --dataset sintel --gpu_accelerator nvidia-tesla-a100 --job_name raft-optimized-a100
 
           # Persist results to GCS
-          cp results/optimized_results.json /mnt/gcs/results/optimized_a100.json
+          cp results/optimized_results.json /mnt/gcs/results/optimized_a100.json || echo "WARN: GCS write failed"
           echo "==> Results saved to GCS"
+        env:
+        - name: DB_HOST
+          valueFrom:
+            secretKeyRef:
+              name: eval-db-credentials
+              key: host
+        - name: DB_USER
+          valueFrom:
+            secretKeyRef:
+              name: eval-db-credentials
+              key: user
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: eval-db-credentials
+              key: password
+        - name: DB_NAME
+          valueFrom:
+            secretKeyRef:
+              name: eval-db-credentials
+              key: database
         resources:
           limits:
             nvidia.com/gpu: "1"

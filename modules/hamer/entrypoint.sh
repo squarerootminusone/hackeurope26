@@ -73,5 +73,8 @@ for f in "${OPTIONAL_FILES[@]}"; do
     fi
 done
 
+# Ensure results directory exists
+mkdir -p /app/hamer/results
+
 echo "[entrypoint] Starting: $*"
 exec "$@"

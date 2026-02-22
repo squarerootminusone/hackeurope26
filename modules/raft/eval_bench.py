@@ -81,6 +81,8 @@ def main():
     parser.add_argument('--mixed_precision', action='store_true')
     parser.add_argument('--alternate_corr', action='store_true')
     parser.add_argument('--results_file', default='results/baseline_results.json')
+    parser.add_argument('--gpu_accelerator', default='unknown')
+    parser.add_argument('--job_name', default='unknown')
     args = parser.parse_args()
 
     model = torch.nn.DataParallel(RAFT(args))
@@ -116,6 +118,18 @@ def main():
     with open(args.results_file, 'w') as f:
         json.dump(results, f, indent=2)
     print(f"Results saved to {args.results_file}")
+
+    # Write to DB
+    try:
+        from bench_db import write_benchmark_result
+        write_benchmark_result(
+            results, module='raft', variant='baseline',
+            gpu_accelerator=args.gpu_accelerator, job_name=args.job_name,
+            dataset=args.dataset, metric_splits=['clean', 'final'],
+            metric_name='epe', extra_keys=['1px', '3px', '5px'],
+        )
+    except Exception as e:
+        print(f"WARNING: DB write failed: {e}")
 
 
 if __name__ == '__main__':

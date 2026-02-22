@@ -33,12 +33,15 @@ WORKDIR /app/raft
 RUN pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
 
 # Install remaining deps
-RUN pip install scipy opencv-python-headless Pillow matplotlib tensorboard
+RUN pip install scipy opencv-python-headless Pillow matplotlib tensorboard pymysql
 
 # OPT 3+4: Patch core modules with optimized versions
 COPY optimized/raft_optimized.py /app/raft/core/raft.py
 COPY optimized/corr_optimized.py /app/raft/core/corr.py
 COPY optimized/update_optimized.py /app/raft/core/update.py
+
+# Copy shared DB writer
+COPY bench_db.py /app/raft/bench_db.py
 
 # OPT 1+12: Copy optimized eval script (torch.compile + channels_last)
 COPY optimized/eval_optimized.py /app/raft/eval_optimized.py

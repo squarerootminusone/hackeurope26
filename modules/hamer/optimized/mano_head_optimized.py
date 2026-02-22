@@ -127,6 +127,7 @@ class MANOTransformerDecoderHeadOptimized(nn.Module):
         }[self.joint_rep_type]
 
         pred_mano_params_list = {}
+        pred_mano_params_list['global_orient'] = torch.cat([joint_conversion_fn(pbp).view(batch_size, -1, 3, 3)[:, [0], :, :] for pbp in pred_hand_pose_list], dim=0)
         pred_mano_params_list['hand_pose'] = torch.cat([joint_conversion_fn(pbp).view(batch_size, -1, 3, 3)[:, 1:, :, :] for pbp in pred_hand_pose_list], dim=0)
         pred_mano_params_list['betas'] = torch.cat(pred_betas_list, dim=0)
         pred_mano_params_list['cam'] = torch.cat(pred_cam_list, dim=0)

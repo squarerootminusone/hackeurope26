@@ -27,10 +27,8 @@ class HamerOptimized(pl.LightningModule):
         self.cfg = cfg
         self.automatic_optimization = False
 
-        # Create backbone
+        # Create backbone (pretrained weights loaded later via checkpoint)
         self.backbone = create_backbone(cfg)
-        if cfg.MODEL.BACKBONE.get('PRETRAINED_WEIGHTS', None):
-            log = self.backbone.load_state_dict(torch.load(cfg.MODEL.BACKBONE.PRETRAINED_WEIGHTS, map_location='cpu')['state_dict'])
 
         # Create optimized MANO head (with early stopping)
         self.mano_head = build_mano_head_optimized(cfg)
@@ -108,9 +106,8 @@ class HamerOptimized(pl.LightningModule):
             'pred_mano_params': pred_mano_params,
         }
 
-        # Lists for IEF intermediate predictions
-        pred_mano_params_list_out = {}
-        if pred_mano_params_list:
+        # Lists for IEF intermediate predictions (training only — not needed at eval)
+        if train and pred_mano_params_list:
             num_iters = pred_mano_params_list['betas'].shape[0] // batch_size
             pred_cam_list = pred_mano_params_list['cam']
             pred_cam_t_list = torch.stack([
@@ -187,11 +184,9 @@ class HamerOptimized(pl.LightningModule):
 def load_hamer_optimized(checkpoint_path, model_cfg=None):
     """Load an optimized HaMeR model from a standard checkpoint."""
     if model_cfg is None:
-        model_cfg = get_config('_DEFAULT', update_cachedir=True)
-    model = HamerOptimized(model_cfg)
-    if checkpoint_path:
-        checkpoint = torch.load(checkpoint_path, map_location='cpu')
-        state_dict = checkpoint.get('state_dict', checkpoint)
-        # Remap keys from base model to optimized model
-        model.load_state_dict(state_dict, strict=False)
+        cfg_path = str(Path(checkpoint_path).parent.parent / 'model_config.yaml')
+        model_cfg = get_config(cfg_path, update_cachedir=True)
+    model = HamerOptimized.load_from_checkpoint(
+        checkpoint_path, strict=False, cfg=model_cfg, init_renderer=False,
+    )
     return model, model_cfg

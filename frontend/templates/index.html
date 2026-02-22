@@ -77,7 +77,7 @@
     }
 
     /* Scrollable table container */
-    .table-scroll { max-height: 260px; overflow-y: auto; }
+    .table-scroll { max-height: calc(100vh - 200px); overflow-y: auto; }
 
     /* Hide initially */
     .hidden-block { display: none; }
@@ -251,38 +251,7 @@
     <!-- ============================================== MAIN CONTENT -->
     <main class="flex-1 overflow-y-auto bg-surface-900">
 
-      <!-- ===================== PIPELINE PROGRESS -->
-      <section class="border-b border-surface-600 px-6 py-5">
-        <div class="flex items-center justify-between mb-4">
-          <h2 class="text-sm font-semibold text-gray-300">Pipeline Progress</h2>
-          <span id="elapsed-time" class="text-xs text-gray-600"></span>
-        </div>
-
-        <!-- Step list -->
-        <div id="steps-container" class="grid grid-cols-3 gap-2 sm:grid-cols-5 lg:grid-cols-9">
-          <!-- Rendered by JS -->
-        </div>
-
-        <!-- Progress bar -->
-        <div class="mt-4 bg-surface-600 rounded-full h-1.5 overflow-hidden">
-          <div id="progress-bar"
-               class="h-full bg-brand-500 rounded-full transition-all duration-500"
-               style="width: 0%"></div>
-        </div>
-        <div class="flex justify-between text-xs text-gray-600 mt-1">
-          <span id="progress-label">Ready to run</span>
-          <span id="progress-pct">0%</span>
-        </div>
-      </section>
-
-      <!-- ===================== RESULTS AREA -->
-      <div id="idle-placeholder"
-           class="flex flex-col items-center justify-center py-24 text-center text-gray-600">
-        <div class="text-6xl mb-4">🌿</div>
-        <p class="text-sm">Configure your repository and SCI parameters,<br>then click <strong class="text-gray-400">Start Pipeline</strong> to begin.</p>
-      </div>
-
-      <!-- SCI Dashboard (hidden until results ready) -->
+      <!-- ===================== SCI Dashboard (hidden until results ready) -->
       <div id="sci-dashboard" class="hidden-block px-6 pb-8 pt-6 space-y-6">
 
         <!-- ---- Header row: reduction badges ---- -->
@@ -386,7 +355,7 @@
             </div>
           </div>
 
-          <!-- SCI score comparison + environmental equivalents -->
+          <!-- SCI score comparison -->
           <div class="bg-surface-700 rounded-xl p-5 border border-surface-500">
             <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">
               SCI Score Comparison
@@ -423,14 +392,17 @@
 
       </div><!-- /sci-dashboard -->
 
-      <!-- ===================== EVALUATIONS DB (always visible) -->
+      <!-- ===================== BENCHMARK RESULTS (always visible) -->
       <div class="px-6 pb-8 pt-2">
         <div class="bg-surface-700 rounded-xl border border-surface-500">
           <div class="flex items-center justify-between px-5 py-4 border-b border-surface-600">
-            <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-              Evaluations Database
-            </h3>
-            <button onclick="loadEvaluations()"
+            <div class="flex items-center gap-3">
+              <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">
+                Benchmark Results
+              </h3>
+              <span id="bench-hint" class="text-xs text-gray-600 italic">Click a row to view SCI breakdown</span>
+            </div>
+            <button onclick="loadBenchmarkResults()"
                     class="text-xs text-brand-400 hover:text-brand-300 transition-colors">
               ↻ Refresh
             </button>
@@ -440,20 +412,22 @@
               <thead class="sticky top-0 bg-surface-700">
                 <tr class="text-gray-500 border-b border-surface-600">
                   <th class="px-4 py-2.5 text-left font-medium">ID</th>
-                  <th class="px-4 py-2.5 text-left font-medium">Evaluation Name</th>
+                  <th class="px-4 py-2.5 text-left font-medium">Job Name</th>
                   <th class="px-4 py-2.5 text-left font-medium">Model</th>
-                  <th class="px-4 py-2.5 text-left font-medium">Optimised</th>
-                  <th class="px-4 py-2.5 text-left font-medium">VM Reference</th>
-                  <th class="px-4 py-2.5 text-left font-medium">Instance Type</th>
+                  <th class="px-4 py-2.5 text-left font-medium">Variant</th>
+                  <th class="px-4 py-2.5 text-left font-medium">GPU</th>
+                  <th class="px-4 py-2.5 text-left font-medium">Dataset</th>
+                  <th class="px-4 py-2.5 text-left font-medium">Metric</th>
+                  <th class="px-4 py-2.5 text-left font-medium">Value</th>
+                  <th class="px-4 py-2.5 text-left font-medium">Throughput</th>
+                  <th class="px-4 py-2.5 text-left font-medium">Avg Latency</th>
+                  <th class="px-4 py-2.5 text-left font-medium">Eval Time</th>
                   <th class="px-4 py-2.5 text-left font-medium">Created</th>
-                  <th class="px-4 py-2.5 text-left font-medium">Started</th>
-                  <th class="px-4 py-2.5 text-left font-medium">Ended</th>
-                  <th class="px-4 py-2.5 text-left font-medium">Updated</th>
                 </tr>
               </thead>
-              <tbody id="eval-table-body" class="divide-y divide-surface-600 text-gray-300">
+              <tbody id="bench-table-body" class="divide-y divide-surface-600 text-gray-300">
                 <tr>
-                  <td colspan="10" class="px-4 py-4 text-center text-gray-600 italic">
+                  <td colspan="12" class="px-4 py-4 text-center text-gray-600 italic">
                     Loading…
                   </td>
                 </tr>
@@ -462,6 +436,7 @@
           </div>
         </div>
       </div>
+
 
     </main>
   </div><!-- /main layout -->
