@@ -82,12 +82,16 @@ def run_eval(model, model_cfg, dataset_cfg, device, args, label=""):
         torch.cuda.synchronize()
     elapsed = time.time() - start
 
-    # Save results
-    results_dir = os.path.join(args.results_folder, label.lower().replace(' ', '_'))
-    os.makedirs(results_dir, exist_ok=True)
+    # Collect accuracy metrics
     evaluator.log()
+    accuracy_metrics = {}
+    if evaluator.metrics is not None:
+        accuracy_metrics = {metric: float(getattr(evaluator, metric)[:evaluator.counter].mean()) for metric in evaluator.metrics}
+    if hasattr(evaluator, 'pck_evaluator') and evaluator.pck_evaluator is not None:
+        pck_metrics = evaluator.pck_evaluator.get_metrics_dict()
+        accuracy_metrics.update({k: float(v) for k, v in pck_metrics.items()})
 
-    return elapsed, len(dataset)
+    return elapsed, len(dataset), accuracy_metrics
 
 
 def main():
@@ -116,28 +120,34 @@ def main():
         model_base, model_cfg_base = load_hamer(args.checkpoint)
         model_base = model_base.to(device)
         model_base.eval()
-        t_base, n_samples = run_eval(model_base, model_cfg_base, dataset_cfg, device, args, label="Baseline")
+        t_base, n_samples, acc_base = run_eval(model_base, model_cfg_base, dataset_cfg, device, args, label="Baseline")
         results['baseline'] = {
             'time_sec': t_base,
             'samples': n_samples,
             'samples_per_sec': n_samples / t_base,
+            'accuracy': acc_base,
         }
         del model_base
         torch.cuda.empty_cache()
         print(f"Baseline: {t_base:.2f}s ({n_samples / t_base:.1f} samples/s)")
+        for k, v in acc_base.items():
+            print(f"  {k}: {v:.4f}")
 
     # --- Optimized ---
     print("\n=== OPTIMIZED MODEL ===")
     model_opt, model_cfg_opt = load_hamer_optimized(args.checkpoint)
     model_opt = model_opt.to(device)
     model_opt.eval()
-    t_opt, n_samples = run_eval(model_opt, model_cfg_opt, dataset_cfg, device, args, label="Optimized")
+    t_opt, n_samples, acc_opt = run_eval(model_opt, model_cfg_opt, dataset_cfg, device, args, label="Optimized")
     results['optimized'] = {
         'time_sec': t_opt,
         'samples': n_samples,
         'samples_per_sec': n_samples / t_opt,
+        'accuracy': acc_opt,
     }
     print(f"Optimized: {t_opt:.2f}s ({n_samples / t_opt:.1f} samples/s)")
+    for k, v in acc_opt.items():
+        print(f"  {k}: {v:.4f}")
 
     # --- Summary ---
     if 'baseline' in results:

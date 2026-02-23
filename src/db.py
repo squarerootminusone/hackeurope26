@@ -7,7 +7,7 @@ from google.cloud import secretmanager
 
 PROJECT = "data-platform-dev-486916"
 SECRET_ID = "eval-db-password"
-DB_HOST = "35.205.179.231"
+DB_HOST = "34.38.118.228"
 DB_USER = "eval_user"
 DB_NAME = "evaluations_db"
 

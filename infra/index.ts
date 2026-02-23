@@ -64,7 +64,26 @@ const cluster = new gcp.container.Cluster("bench-test-cluster", {
 });
 
 // =============================================================================
-// Cloud SQL (MySQL 8.0)
+// Private Service Connection (for Cloud SQL private IP)
+// =============================================================================
+
+const privateIpRange = new gcp.compute.GlobalAddress("private-ip-range", {
+  name: `bench-test-private-ip-${RTAG}`,
+  purpose: "VPC_PEERING",
+  addressType: "INTERNAL",
+  prefixLength: 16,
+  network: network.id,
+  project: PROJECT,
+});
+
+const privateVpcConnection = new gcp.servicenetworking.Connection("private-vpc-connection", {
+  network: network.id,
+  service: "servicenetworking.googleapis.com",
+  reservedPeeringRanges: [privateIpRange.name],
+});
+
+// =============================================================================
+// Cloud SQL (MySQL 8.0) — private IP only, VPC-internal access
 // =============================================================================
 
 const sqlInstance = new gcp.sql.DatabaseInstance("bench-test-eval-db", {
@@ -77,13 +96,13 @@ const sqlInstance = new gcp.sql.DatabaseInstance("bench-test-eval-db", {
     diskType: "PD_SSD",
     diskSize: 10,
     ipConfiguration: {
-      ipv4Enabled: true,
-      authorizedNetworks: [{ value: "0.0.0.0/0", name: "all" }],
+      ipv4Enabled: false,
+      privateNetwork: network.id,
     },
     userLabels: labels,
   },
   deletionProtection: false,
-});
+}, { dependsOn: [privateVpcConnection] });
 
 const database = new gcp.sql.Database("evaluations-db", {
   name: "evaluations_db",
@@ -211,7 +230,7 @@ new gcp.storage.BucketIAMMember("raft-gsa-bucket-reader", {
 
 new gcp.storage.BucketIAMMember("raft-gsa-bucket-writer", {
   bucket: bucket.name,
-  role: "roles/storage.objectCreator",
+  role: "roles/storage.objectAdmin",
   member: pulumi.interpolate`serviceAccount:${raftGsa.email}`,
 });
 
@@ -229,7 +248,7 @@ export const vpcName = network.name;
 export const subnetName = subnet.name;
 export const clusterName = cluster.name;
 export const clusterEndpoint = cluster.endpoint;
-export const sqlInstanceIp = sqlInstance.publicIpAddress;
+export const sqlInstanceIp = sqlInstance.privateIpAddress;
 export const sqlConnectionName = sqlInstance.connectionName;
 export const dbName = database.name;
 export const bucketName = bucket.name;
